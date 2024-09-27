@@ -1,65 +1,54 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Article } from './article.entity';
+import { VietnamnetArticle } from './vietnamnetarticle.entity';
 import { ConfigService } from '@nestjs/config';
 import { Worker } from 'worker_threads';
 import * as path from 'path';
-import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
-export class WebCrawlerService implements OnModuleInit {
+export class VietnamnetService {
   private urlCache: Map<string, Date> = new Map();
   private CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
   constructor(
-    @InjectRepository(Article)
-    private articleRepository: Repository<Article>,
+    @InjectRepository(VietnamnetArticle)
+    private vietnamnetArticleRepository: Repository<VietnamnetArticle>,
     private configService: ConfigService,
   ) {}
 
-  private BASE_URL = 'https://vnexpress.net/';
+  private BASE_URL = 'https://vietnamnet.vn/';
   private articleTypes = {
     0: 'thoi-su',
-    1: 'du-lich',
+    1: 'kinh-doanh',
     2: 'the-gioi',
-    3: 'kinh-doanh',
-    4: 'khoa-hoc',
-    5: 'giai-tri',
-    6: 'the-thao',
-    7: 'phap-luat',
-    8: 'giao-duc',
-    9: 'suc-khoe',
-    10: 'doi-song',
+    3: 'giai-tri',
+    4: 'the-thao',
+    5: 'doi-song',
+    6: 'giao-duc',
+    7: 'suc-khoe',
+    8: 'thong-tin-truyen-thong',
+    9: 'phap-luat',
+    10: 'oto-xe-may',
   };
 
   private isRunning = false;
 
-  onModuleInit() {
-    this.startCrawling();
-  }
-
-  @Cron(CronExpression.EVERY_HOUR)
-  async scheduledCrawling() {
-    console.log('Bắt đầu crawl theo lịch...');
-    await this.startCrawling();
-  }
-
   public async startCrawling() {
     if (this.isRunning) {
-      console.log('Crawler đang chạy');
+      console.log('VietnamNet Crawler is already running');
       return;
     }
 
     this.isRunning = true;
-    console.log('Bắt đầu crawler...');
+    console.log('Starting VietnamNet crawler...');
 
     try {
       const workerPromises = Object.entries(this.articleTypes).map(
         ([, articleType]) => {
           return new Promise<void>((resolve, reject) => {
             const worker = new Worker(
-              path.join(__dirname, 'crawler.worker.js'),
+              path.join(__dirname, 'vietnamnet.worker.js'),
               {
                 workerData: { articleType, BASE_URL: this.BASE_URL },
               },
@@ -85,10 +74,10 @@ export class WebCrawlerService implements OnModuleInit {
 
       await Promise.all(workerPromises);
     } catch (error) {
-      console.error('Lỗi trong quá trình crawl:', error);
+      console.error('Error in VietnamNet crawling process:', error);
     } finally {
       this.isRunning = false;
-      console.log('Crawl hoàn tất');
+      console.log('VietnamNet Crawl completed');
     }
   }
 
@@ -107,19 +96,19 @@ export class WebCrawlerService implements OnModuleInit {
     this.urlCache.set(url, new Date());
   }
 
-  private async saveArticle(articleData: Partial<Article>) {
+  private async saveArticle(articleData: Partial<VietnamnetArticle>) {
     if (this.isCached(articleData.url)) {
       console.log(`Skipping cached article: ${articleData.url}`);
       return;
     }
 
-    const existingArticle = await this.articleRepository.findOne({
+    const existingArticle = await this.vietnamnetArticleRepository.findOne({
       where: { url: articleData.url },
     });
     if (!existingArticle) {
-      const article = this.articleRepository.create(articleData);
-      await this.articleRepository.save(article);
-      console.log(`Đã lưu bài viết mới: ${articleData.title}`);
+      const article = this.vietnamnetArticleRepository.create(articleData);
+      await this.vietnamnetArticleRepository.save(article);
+      console.log(`Saved new VietnamNet article: ${articleData.title}`);
       this.addToCache(articleData.url);
     }
   }
@@ -129,6 +118,6 @@ export class WebCrawlerService implements OnModuleInit {
   }
 
   async getArticles() {
-    return this.articleRepository.find();
+    return this.vietnamnetArticleRepository.find();
   }
 }

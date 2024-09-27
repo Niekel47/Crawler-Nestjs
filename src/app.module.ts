@@ -3,6 +3,9 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CrawlerModule } from './crawler/crawler.module';
 import { Article } from './crawler/article.entity';
+import { VietnamnetModule } from './vietnamnet/vietnamnet.module';
+import { VietnamnetArticle } from './vietnamnet/vietnamnetarticle.entity';
+import { CrawlerManagerService } from './CrawlerManager.service';
 
 @Module({
   imports: [
@@ -14,12 +17,13 @@ import { Article } from './crawler/article.entity';
       username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
-      entities: [Article],
+      entities: [Article, VietnamnetArticle],
       synchronize: process.env.NODE_ENV !== 'production',
     }),
     CrawlerModule,
+    VietnamnetModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [CrawlerManagerService],
 })
 export class AppModule {}

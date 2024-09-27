@@ -8,5 +8,6 @@ import { Article } from './article.entity';
   imports: [TypeOrmModule.forFeature([Article])],
   controllers: [WebCrawlerController],
   providers: [WebCrawlerService],
+  exports: [WebCrawlerService],
 })
 export class CrawlerModule {}
