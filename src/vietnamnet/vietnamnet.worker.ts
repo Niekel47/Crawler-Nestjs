@@ -79,13 +79,12 @@ async function extractContent(
       const title = $('h1.content-detail-title').first().text().trim();
       if (!title) return null;
 
-      const description = $('.content-detail-sapo').text().trim();
+      const description = $('h2.content-detail-sapo').text().trim();
+      const content = $('.content-detail').text().trim();
       const publishDate = $('.bread-crumb-detail__time').first().text().trim();
-
       const category = $('.bread-crumb-detail__list li:last-child a')
         .text()
         .trim();
-
       const imageUrl =
         $('meta[property="og:image"]').attr('content') ||
         $('.fig-picture img').attr('src') ||
@@ -95,7 +94,7 @@ async function extractContent(
       return cleanArticleData({
         title,
         description,
-        content: '', // Bỏ qua phần nội dung
+        content,
         url,
         publishDate: standardizeDate(publishDate),
         category: category || articleType,

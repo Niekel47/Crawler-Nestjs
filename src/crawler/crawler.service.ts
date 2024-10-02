@@ -1,11 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Article } from './article.entity';
+import { Article } from '../models/article.entity';
 import { ConfigService } from '@nestjs/config';
 import { Worker } from 'worker_threads';
 import * as path from 'path';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { Category } from '../models/category.entity';
 
 @Injectable()
 export class WebCrawlerService implements OnModuleInit {
@@ -15,6 +16,8 @@ export class WebCrawlerService implements OnModuleInit {
   constructor(
     @InjectRepository(Article)
     private articleRepository: Repository<Article>,
+    @InjectRepository(Category)
+    private categoryRepository: Repository<Category>,
     private configService: ConfigService,
   ) {}
 
@@ -109,18 +112,60 @@ export class WebCrawlerService implements OnModuleInit {
 
   private async saveArticle(articleData: Partial<Article>) {
     if (this.isCached(articleData.url)) {
-      console.log(`Skipping cached article: ${articleData.url}`);
+      console.log(`Bỏ qua bài viết đã cache: ${articleData.url}`);
       return;
     }
 
-    const existingArticle = await this.articleRepository.findOne({
-      where: { url: articleData.url },
-    });
-    if (!existingArticle) {
-      const article = this.articleRepository.create(articleData);
-      await this.articleRepository.save(article);
-      console.log(`Đã lưu bài viết mới: ${articleData.title}`);
-      this.addToCache(articleData.url);
+    try {
+      const existingArticle = await this.articleRepository.findOne({
+        where: { url: articleData.url },
+      });
+
+      if (!existingArticle) {
+        const category = await this.getOrCreateCategory(
+          articleData.category as unknown as string,
+        );
+        const article = this.articleRepository.create({
+          ...articleData,
+          category: category,
+        });
+        await this.articleRepository.save(article);
+        console.log(`Đã lưu bài viết mới: ${articleData.title}`);
+        this.addToCache(articleData.url);
+      } else {
+        console.log(`Bài viết đã tồn tại: ${articleData.title}`);
+      }
+    } catch (error) {
+      if (error.code === '23505') {
+        // Unique constraint violation
+        console.log(
+          `Bài viết đã tồn tại (concurrent insert): ${articleData.title}`,
+        );
+      } else {
+        console.error(`Lỗi khi lưu bài viết: ${articleData.title}`, error);
+      }
+    }
+  }
+
+  private async getOrCreateCategory(categoryName: string): Promise<Category> {
+    try {
+      let category = await this.categoryRepository.findOne({
+        where: { name: categoryName },
+      });
+      if (!category) {
+        category = this.categoryRepository.create({ name: categoryName });
+        await this.categoryRepository.save(category);
+      }
+      return category;
+    } catch (error) {
+      if (error.code === '23505') {
+        // Unique constraint violation
+        // If the error is due to a duplicate, try to fetch the category again
+        return await this.categoryRepository.findOne({
+          where: { name: categoryName },
+        });
+      }
+      throw error; // If it's a different error, rethrow it
     }
   }
 
@@ -129,6 +174,26 @@ export class WebCrawlerService implements OnModuleInit {
   }
 
   async getArticles() {
-    return this.articleRepository.find();
+    return this.articleRepository.find({ relations: ['category'] });
+  }
+
+  async getArticleById(id: number): Promise<Article | undefined> {
+    return this.articleRepository.findOne({
+      where: { id },
+      relations: ['category'],
+    });
+  }
+
+  async getArticlesByCategory(categoryName: string) {
+    const category = await this.categoryRepository.findOne({
+      where: { name: categoryName },
+    });
+    if (!category) {
+      return [];
+    }
+    return this.articleRepository.find({
+      where: { category: { id: category.id } },
+      relations: ['category'],
+    });
   }
 }

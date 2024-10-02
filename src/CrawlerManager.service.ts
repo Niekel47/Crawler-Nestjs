@@ -14,20 +14,19 @@ export class CrawlerManagerService implements OnModuleInit {
     this.startCrawling();
   }
 
-  @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async scheduledCrawling() {
     console.log('Bắt đầu crawl theo lịch...');
     await this.startCrawling();
   }
 
   private async startCrawling() {
-    console.log('Bắt đầu VietnamNet crawler...');
-    await this.vietnamNetCrawlerService.startCrawling();
-    console.log('VietnamNet crawl hoàn tất');
-
-    console.log('Bắt đầu WebCrawler...');
-    await this.webCrawlerService.startCrawling();
-    console.log('WebCrawler hoàn tất');
+    console.log('Bắt đầu crawl...');
+    await Promise.all([
+      this.vietnamNetCrawlerService.startCrawling(),
+      this.webCrawlerService.startCrawling(), //VnExpress crawler
+    ]);
+    console.log('Crawl hoàn tất');
   }
 
   stopCrawling() {

@@ -2,7 +2,7 @@ import { parentPort, workerData } from 'worker_threads';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as moment from 'moment';
-import { Article } from './article.entity';
+import { Article } from '../models/article.entity';
 
 const { articleType, BASE_URL } = workerData;
 

@@ -1,4 +1,5 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Category } from 'src/models/category.entity';
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne } from 'typeorm';
 
 @Entity()
 export class VietnamnetArticle {
@@ -20,8 +21,8 @@ export class VietnamnetArticle {
   @Column()
   publishDate: Date;
 
-  @Column()
-  category: string;
+  @ManyToOne(() => Category, (category) => category.vietnamnetArticles)
+  category: Category;
 
   @Column({ nullable: true })
   imageUrl: string;

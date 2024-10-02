@@ -5,6 +5,7 @@ import { VietnamnetArticle } from './vietnamnetarticle.entity';
 import { ConfigService } from '@nestjs/config';
 import { Worker } from 'worker_threads';
 import * as path from 'path';
+import { Category } from '../models/category.entity';
 
 @Injectable()
 export class VietnamnetService {
@@ -14,6 +15,8 @@ export class VietnamnetService {
   constructor(
     @InjectRepository(VietnamnetArticle)
     private vietnamnetArticleRepository: Repository<VietnamnetArticle>,
+    @InjectRepository(Category)
+    private categoryRepository: Repository<Category>,
     private configService: ConfigService,
   ) {}
 
@@ -102,14 +105,56 @@ export class VietnamnetService {
       return;
     }
 
-    const existingArticle = await this.vietnamnetArticleRepository.findOne({
-      where: { url: articleData.url },
-    });
-    if (!existingArticle) {
-      const article = this.vietnamnetArticleRepository.create(articleData);
-      await this.vietnamnetArticleRepository.save(article);
-      console.log(`Saved new VietnamNet article: ${articleData.title}`);
-      this.addToCache(articleData.url);
+    try {
+      const existingArticle = await this.vietnamnetArticleRepository.findOne({
+        where: { url: articleData.url },
+      });
+
+      if (!existingArticle) {
+        const category = await this.getOrCreateCategory(
+          articleData.category as unknown as string,
+        );
+        const article = this.vietnamnetArticleRepository.create({
+          ...articleData,
+          category: category,
+        });
+        await this.vietnamnetArticleRepository.save(article);
+        console.log(`Saved new VietnamNet article: ${articleData.title}`);
+        this.addToCache(articleData.url);
+      } else {
+        console.log(`Article already exists: ${articleData.title}`);
+      }
+    } catch (error) {
+      if (error.code === '23505') {
+        // Unique constraint violation
+        console.log(
+          `Article already exists (concurrent insert): ${articleData.title}`,
+        );
+      } else {
+        console.error(`Error saving article: ${articleData.title}`, error);
+      }
+    }
+  }
+
+  private async getOrCreateCategory(categoryName: string): Promise<Category> {
+    try {
+      let category = await this.categoryRepository.findOne({
+        where: { name: categoryName },
+      });
+      if (!category) {
+        category = this.categoryRepository.create({ name: categoryName });
+        await this.categoryRepository.save(category);
+      }
+      return category;
+    } catch (error) {
+      if (error.code === '23505') {
+        // Unique constraint violation
+        // If the error is due to a duplicate, try to fetch the category again
+        return await this.categoryRepository.findOne({
+          where: { name: categoryName },
+        });
+      }
+      throw error; // If it's a different error, rethrow it
     }
   }
 
@@ -118,6 +163,26 @@ export class VietnamnetService {
   }
 
   async getArticles() {
-    return this.vietnamnetArticleRepository.find();
+    return this.vietnamnetArticleRepository.find({ relations: ['category'] });
+  }
+
+  async getArticleById(id: number): Promise<VietnamnetArticle | undefined> {
+    return this.vietnamnetArticleRepository.findOne({
+      where: { id },
+      relations: ['category'],
+    });
+  }
+
+  async getArticlesByCategory(categoryName: string) {
+    const category = await this.categoryRepository.findOne({
+      where: { name: categoryName },
+    });
+    if (!category) {
+      return [];
+    }
+    return this.vietnamnetArticleRepository.find({
+      where: { category: { id: category.id } },
+      relations: ['category'],
+    });
   }
 }

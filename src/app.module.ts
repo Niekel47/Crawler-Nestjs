@@ -2,10 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CrawlerModule } from './crawler/crawler.module';
-import { Article } from './crawler/article.entity';
+import { Article } from './models/article.entity';
 import { VietnamnetModule } from './vietnamnet/vietnamnet.module';
 import { VietnamnetArticle } from './vietnamnet/vietnamnetarticle.entity';
 import { CrawlerManagerService } from './CrawlerManager.service';
+import { Category } from './models/category.entity';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { CrawlerManagerService } from './CrawlerManager.service';
       username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
-      entities: [Article, VietnamnetArticle],
+      entities: [Article, VietnamnetArticle, Category],
       synchronize: process.env.NODE_ENV !== 'production',
     }),
     CrawlerModule,
