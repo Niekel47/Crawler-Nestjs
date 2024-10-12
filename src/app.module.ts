@@ -4,9 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CrawlerModule } from './crawler/crawler.module';
 import { Article } from './models/article.entity';
 import { VietnamnetModule } from './vietnamnet/vietnamnet.module';
-import { VietnamnetArticle } from './vietnamnet/vietnamnetarticle.entity';
+// import { VietnamnetArticle } from './vietnamnet/vietnamnetarticle.entity';
 import { CrawlerManagerService } from './CrawlerManager.service';
 import { Category } from './models/category.entity';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -18,11 +19,12 @@ import { Category } from './models/category.entity';
       username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
-      entities: [Article, VietnamnetArticle, Category],
+      entities: [Article, Category],
       synchronize: process.env.NODE_ENV !== 'production',
     }),
     CrawlerModule,
     VietnamnetModule,
+    AuthModule,
   ],
   controllers: [],
   providers: [CrawlerManagerService],

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { VietnamnetArticle } from './vietnamnetarticle.entity';
+import { Article } from '../models/article.entity';
 import { ConfigService } from '@nestjs/config';
 import { Worker } from 'worker_threads';
 import * as path from 'path';
@@ -13,8 +13,8 @@ export class VietnamnetService {
   private CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
   constructor(
-    @InjectRepository(VietnamnetArticle)
-    private vietnamnetArticleRepository: Repository<VietnamnetArticle>,
+    @InjectRepository(Article)
+    private articleRepository: Repository<Article>,
     @InjectRepository(Category)
     private categoryRepository: Repository<Category>,
     private configService: ConfigService,
@@ -99,14 +99,14 @@ export class VietnamnetService {
     this.urlCache.set(url, new Date());
   }
 
-  private async saveArticle(articleData: Partial<VietnamnetArticle>) {
+  private async saveArticle(articleData: Partial<Article>) {
     if (this.isCached(articleData.url)) {
       console.log(`Skipping cached article: ${articleData.url}`);
       return;
     }
 
     try {
-      const existingArticle = await this.vietnamnetArticleRepository.findOne({
+      const existingArticle = await this.articleRepository.findOne({
         where: { url: articleData.url },
       });
 
@@ -114,11 +114,12 @@ export class VietnamnetService {
         const category = await this.getOrCreateCategory(
           articleData.category as unknown as string,
         );
-        const article = this.vietnamnetArticleRepository.create({
+        const article = this.articleRepository.create({
           ...articleData,
           category: category,
+          source: this.BASE_URL,
         });
-        await this.vietnamnetArticleRepository.save(article);
+        await this.articleRepository.save(article);
         console.log(`Saved new VietnamNet article: ${articleData.title}`);
         this.addToCache(articleData.url);
       } else {
@@ -163,11 +164,11 @@ export class VietnamnetService {
   }
 
   async getArticles() {
-    return this.vietnamnetArticleRepository.find({ relations: ['category'] });
+    return this.articleRepository.find({ relations: ['category'] });
   }
 
-  async getArticleById(id: number): Promise<VietnamnetArticle | undefined> {
-    return this.vietnamnetArticleRepository.findOne({
+  async getArticleById(id: number): Promise<Article | undefined> {
+    return this.articleRepository.findOne({
       where: { id },
       relations: ['category'],
     });
@@ -180,7 +181,7 @@ export class VietnamnetService {
     if (!category) {
       return [];
     }
-    return this.vietnamnetArticleRepository.find({
+    return this.articleRepository.find({
       where: { category: { id: category.id } },
       relations: ['category'],
     });

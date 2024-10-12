@@ -50,7 +50,7 @@ export class WebCrawlerService implements OnModuleInit {
 
   public async startCrawling() {
     if (this.isRunning) {
-      console.log('Crawler đang chạy');
+      console.log(' Vnexpress crawler đang chạy');
       return;
     }
 
@@ -128,6 +128,7 @@ export class WebCrawlerService implements OnModuleInit {
         const article = this.articleRepository.create({
           ...articleData,
           category: category,
+          source: this.BASE_URL,
         });
         await this.articleRepository.save(article);
         console.log(`Đã lưu bài viết mới: ${articleData.title}`);
@@ -173,8 +174,38 @@ export class WebCrawlerService implements OnModuleInit {
     this.isRunning = false;
   }
 
-  async getArticles() {
-    return this.articleRepository.find({ relations: ['category'] });
+  async getArticles(
+    category?: string,
+    limit?: number,
+    offset?: number,
+    search?: string,
+  ) {
+    const query = this.articleRepository
+      .createQueryBuilder('article')
+      .leftJoinAndSelect('article.category', 'category');
+
+    if (category) {
+      query.andWhere('category.name = :category', { category });
+    }
+
+    if (search) {
+      query.andWhere(
+        '(article.title LIKE :search OR article.content LIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    if (limit) {
+      query.take(limit);
+    }
+
+    if (offset) {
+      query.skip(offset);
+    }
+
+    const [articles, total] = await query.getManyAndCount();
+
+    return { data: articles, total };
   }
 
   async getArticleById(id: number): Promise<Article | undefined> {

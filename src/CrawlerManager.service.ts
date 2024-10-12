@@ -35,9 +35,9 @@ export class CrawlerManagerService implements OnModuleInit {
   }
 
   async getArticles() {
-    const vietnamnetArticles =
-      await this.vietnamNetCrawlerService.getArticles();
+    // const vietnamnetArticles =
+    //   await this.vietnamNetCrawlerService.getArticles();
     const webCrawlerArticles = await this.webCrawlerService.getArticles();
-    return [...vietnamnetArticles, ...webCrawlerArticles];
+    return [webCrawlerArticles];
   }
 }

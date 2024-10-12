@@ -2,7 +2,7 @@ import { parentPort, workerData } from 'worker_threads';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as moment from 'moment';
-import { VietnamnetArticle } from './vietnamnetarticle.entity';
+import { Article } from '../models/article.entity';
 
 const { articleType, BASE_URL } = workerData;
 
@@ -65,9 +65,7 @@ async function getUrlsOfTypeThread(): Promise<string[]> {
   }
 }
 
-async function extractContent(
-  url: string,
-): Promise<Partial<VietnamnetArticle> | null> {
+async function extractContent(url: string): Promise<Partial<Article> | null> {
   const maxRetries = 3;
   let retries = 0;
 
@@ -141,9 +139,7 @@ function standardizeDate(dateString: string): Date {
   return date.isValid() ? date.toDate() : new Date();
 }
 
-function cleanArticleData(
-  article: Partial<VietnamnetArticle>,
-): Partial<VietnamnetArticle> {
+function cleanArticleData(article: Partial<Article>): Partial<Article> {
   const cleanText = (text: string) =>
     text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
 

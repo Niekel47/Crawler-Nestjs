@@ -26,4 +26,7 @@ export class Article {
 
   @Column({ nullable: true })
   imageUrl: string;
+
+  @Column()
+  source: string;
 }
