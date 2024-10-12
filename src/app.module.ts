@@ -7,7 +7,6 @@ import { VietnamnetModule } from './vietnamnet/vietnamnet.module';
 // import { VietnamnetArticle } from './vietnamnet/vietnamnetarticle.entity';
 import { CrawlerManagerService } from './CrawlerManager.service';
 import { Category } from './models/category.entity';
-import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -24,7 +23,6 @@ import { AuthModule } from './auth/auth.module';
     }),
     CrawlerModule,
     VietnamnetModule,
-    AuthModule,
   ],
   controllers: [],
   providers: [CrawlerManagerService],
