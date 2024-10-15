@@ -175,11 +175,17 @@ export class WebCrawlerService implements OnModuleInit {
   }
 
   async getArticles(
-    category?: string,
+    page?: number,
     limit?: number,
-    offset?: number,
+    sort?: string,
     search?: string,
+    category?: string,
   ) {
+    page = page || 1;
+    limit = limit || 10;
+    const offset: number = (page - 1) * limit;
+    sort = sort || 'id|desc';
+
     const query = this.articleRepository
       .createQueryBuilder('article')
       .leftJoinAndSelect('article.category', 'category');
@@ -195,19 +201,36 @@ export class WebCrawlerService implements OnModuleInit {
       );
     }
 
-    if (limit) {
-      query.take(limit);
-    }
+    // Parse sorting
+    const sorts = sort.split(',');
+    sorts.forEach((sortItem) => {
+      const [field, order] = sortItem.split('|');
+      if (field.includes('.')) {
+        const [relation, relationField] = field.split('.');
+        query.addOrderBy(
+          `${relation}.${relationField}`,
+          order.toUpperCase() as 'ASC' | 'DESC',
+        );
+      } else {
+        query.addOrderBy(
+          `article.${field}`,
+          order.toUpperCase() as 'ASC' | 'DESC',
+        );
+      }
+    });
 
-    if (offset) {
-      query.skip(offset);
-    }
+    query.skip(offset).take(limit);
 
     const [articles, total] = await query.getManyAndCount();
 
-    return { data: articles, total };
+    return {
+      data: articles,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
-
   async getArticleById(id: number): Promise<Article | undefined> {
     return this.articleRepository.findOne({
       where: { id },

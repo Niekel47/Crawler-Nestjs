@@ -6,13 +6,20 @@ export class WebCrawlerController {
   constructor(private readonly webCrawlerService: WebCrawlerService) {}
 
   @Get('articles')
-  getArticles(
-    @Query('category') category?: string,
+  async getArticles(
+    @Query('page') page?: number,
     @Query('limit') limit?: number,
-    @Query('offset') offset?: number,
+    @Query('sort') sort?: string,
     @Query('search') search?: string,
+    @Query('category') category?: string,
   ) {
-    return this.webCrawlerService.getArticles(category, limit, offset, search);
+    return this.webCrawlerService.getArticles(
+      page,
+      limit,
+      sort,
+      search,
+      category,
+    );
   }
 
   @Get('articles/:id')
