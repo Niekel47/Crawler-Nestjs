@@ -41,9 +41,14 @@ export class UserService {
   }
 
   async login(user: any) {
-    const payload = { email: user.email, sub: user.id };
+    const payload = { username: user.username, sub: user.userId };
     return {
       access_token: this.jwtService.sign(payload),
+      refresh_token: this.jwtService.sign(payload, { expiresIn: '7d' }),
+      user: {
+        ...user,
+        fullName: `${user.lastName} ${user.firstName}`.trim(),
+      },
     };
   }
 

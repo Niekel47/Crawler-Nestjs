@@ -1,4 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  Index,
+} from 'typeorm';
 import { Category } from './category.entity';
 
 @Entity()
@@ -7,6 +13,7 @@ export class Article {
   id: number;
 
   @Column()
+  @Index()
   title: string;
 
   @Column('text')
@@ -29,4 +36,7 @@ export class Article {
 
   @Column()
   source: string;
+
+  @Column({ type: 'text', nullable: true })
+  summary: string;
 }

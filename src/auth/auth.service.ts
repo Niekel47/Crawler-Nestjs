@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { UserService } from '../user/user.service';
 import { JwtService } from '@nestjs/jwt';
 import { CreateUserDto } from '../dto/user.dto';
+import { HttpException } from '@nestjs/common';
 
 @Injectable()
 export class AuthService {
@@ -11,19 +12,43 @@ export class AuthService {
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
-    return this.userService.validateUser(email, password);
+    const user = await this.userService.validateUser(email, password);
+    if (!user) {
+      throw new HttpException('Invalid credentials', 401);
+    }
+    return user;
   }
 
   async login(user: any) {
-    return this.userService.login(user);
+    const result = await this.userService.login(user);
+    return {
+      status: 200,
+      message: 'Login successful',
+      data: result,
+    };
   }
 
   async refreshToken(user: any) {
-    return this.userService.refreshToken(user);
+    const result = await this.userService.refreshToken(user);
+    return {
+      status: 200,
+      message: 'Token refreshed successfully',
+      data: result,
+    };
   }
 
   async register(createUserDto: CreateUserDto) {
-    const user = await this.userService.create(createUserDto);
-    return this.login(user);
+    try {
+      const user = await this.userService.create(createUserDto);
+      const loginResult = await this.login(user);
+      return {
+        status: 201,
+        message: 'User registered successfully',
+        data: loginResult.data,
+      };
+    } catch (error) {
+      console.log(error);
+      throw new HttpException('Failed to register user', 500);
+    }
   }
 }

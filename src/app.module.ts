@@ -1,4 +1,9 @@
-import { Module } from '@nestjs/common';
+import {
+  Module,
+  MiddlewareConsumer,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CrawlerModule } from './crawler/crawler.module';
@@ -13,6 +18,14 @@ import { UserModule } from './user/user.module';
 import { Role } from './models/role.entity';
 import { User } from './models/user.entity';
 import { RoleModule } from './role/role.module';
+import { TwentyFourHModule } from './24h.com/24h.module';
+import { OpenAIService } from './openai.service';
+import { MetricsModule } from './metrics/metrics.module';
+import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
+import { RedisService } from './redis/redis.service';
+import { LoggingService } from './logging/logging.service';
+import { ContentAnalyzerService } from './content_analyzer/content_analyzer.service';
+// import { TuoitreModule } from './tuoitre/tuoitre.module';
 
 @Module({
   imports: [
@@ -31,14 +44,33 @@ import { RoleModule } from './role/role.module';
       secret: process.env.JWT_SECRET,
       signOptions: { expiresIn: '1h' },
     }),
+
     PassportModule,
     CrawlerModule,
     VietnamnetModule,
     AuthModule,
     UserModule,
     RoleModule,
+    TwentyFourHModule,
+    MetricsModule,
+    // TuoitreModule,
   ],
 
-  providers: [CrawlerManagerService],
+  providers: [
+    CrawlerManagerService,
+    OpenAIService,
+    RedisService,
+    LoggingService,
+    ContentAnalyzerService,
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(RateLimitMiddleware)
+      .forRoutes(
+        { path: 'crawler/start-crawl', method: RequestMethod.GET },
+        { path: 'vietnamnet/start-crawl', method: RequestMethod.GET },
+      );
+  }
+}
