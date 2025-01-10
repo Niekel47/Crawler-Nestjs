@@ -6,7 +6,7 @@ import { TwentyFourHService } from './24h.com/24h.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { OpenAIService } from './openai.service';
-// import { TuoiTreService } from './tuoitre/tuoitre.service';
+import { TuoiTreService } from './tuoitre/tuoitre.service';
 // import { ArticlesPaginationResult } from './crawler/type';
 import Bottleneck from 'bottleneck';
 import { LoggingService } from './logging/logging.service';
@@ -44,7 +44,7 @@ export class CrawlerManagerService implements OnModuleInit {
     private vietnamNetCrawlerService: VietnamnetService,
     private webCrawlerService: WebCrawlerService,
     private twentyFourHService: TwentyFourHService,
-    // private tuoitreService: TuoiTreService,
+    private tuoitreService: TuoiTreService,
     private openAIService: OpenAIService,
     private readonly logger: LoggingService,
     private readonly contentAnalyzerService: ContentAnalyzerService,
@@ -95,10 +95,10 @@ export class CrawlerManagerService implements OnModuleInit {
 
     try {
       await Promise.all([
-        this.vietnamNetCrawlerService.startCrawling(),
+        // this.vietnamNetCrawlerService.startCrawling(),
         // this.webCrawlerService.startCrawling(),
         // this.twentyFourHService.startCrawling(),
-        // this.tuoitreService.startCrawling(),
+        this.tuoitreService.startCrawling(),
       ]);
       // await this.processAndSaveResults();
       // const crawlPromises = [

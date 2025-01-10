@@ -1,154 +1,315 @@
-// import { parentPort, workerData } from 'worker_threads';
-// import axios from 'axios';
-// import cheerio from 'cheerio';
-// import * as moment from 'moment';
-// import { Article } from '../models/article.entity';
-// import { Category } from '../models/category.entity';
+import { parentPort, workerData } from 'worker_threads';
+import axios, { AxiosInstance } from 'axios';
+import * as cheerio from 'cheerio';
+import moment from 'moment';
+import { Article } from '../models/article.entity';
+import { Category } from '../models/category.entity';
+import { RateLimiter } from 'limiter';
+import type { CheerioAPI } from 'cheerio';
 
-// const { categoryUrl, BASE_URL } = workerData;
+interface WorkerData {
+  mode: 'search' | 'crawl';
+  keyword?: string;
+  maxPages?: number;
+  articleType?: string;
+  BASE_URL?: string;
+}
 
-// // Rate Limiter class để kiểm soát tốc độ request
-// class RateLimiter {
-//   private queue: Array<() => Promise<any>> = [];
-//   private processing = false;
+class TuoiTreWorker {
+  private axiosInstance: AxiosInstance;
+  private readonly retryDelay = 3000;
+  private readonly maxRetries = 3;
+  private readonly timeout = 30000;
+  private rateLimiter: RateLimiter;
 
-//   constructor(private delay: number) {}
+  constructor() {
+    this.rateLimiter = new RateLimiter({
+      tokensPerInterval: 3,
+      interval: 'second',
+    });
 
-//   async schedule<T>(fn: () => Promise<T>): Promise<T> {
-//     return new Promise((resolve, reject) => {
-//       this.queue.push(async () => {
-//         try {
-//           const result = await fn();
-//           resolve(result);
-//         } catch (error) {
-//           reject(error);
-//         }
-//       });
+    this.axiosInstance = axios.create({
+      timeout: this.timeout,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      },
+      maxRedirects: 5,
+    });
 
-//       if (!this.processing) {
-//         this.processQueue();
-//       }
-//     });
-//   }
+    this.setupAxiosInterceptors();
+  }
 
-//   private async processQueue() {
-//     if (this.queue.length === 0) {
-//       this.processing = false;
-//       return;
-//     }
+  private setupAxiosInterceptors() {
+    this.axiosInstance.interceptors.request.use(async (config) => {
+      await this.rateLimiter.removeTokens(1);
+      return config;
+    });
 
-//     this.processing = true;
-//     const fn = this.queue.shift();
+    this.axiosInstance.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        if (error.response?.status === 429) {
+          console.log(`[RATE_LIMIT] Đợi ${this.retryDelay}ms...`);
+          await this.delay(this.retryDelay);
+          return this.axiosInstance(error.config);
+        }
+        throw error;
+      },
+    );
+  }
 
-//     if (fn) {
-//       await fn();
-//       await new Promise((resolve) => setTimeout(resolve, this.delay));
-//       await this.processQueue();
-//     }
-//   }
-// }
+  async startCrawling() {
+    try {
+      const { articleType, BASE_URL } = workerData as WorkerData;
+      if (!articleType || !BASE_URL) {
+        throw new Error(
+          'Missing required worker data: articleType or BASE_URL',
+        );
+      }
 
-// const rateLimiter = new RateLimiter(1000); // 1 request/second
+      console.log(`[START] Bắt đầu crawl chuyên mục: ${articleType}`);
+      const categoryUrl = `${BASE_URL}${articleType}.htm`;
+      await this.crawlCategory(categoryUrl);
+      console.log(`[COMPLETE] Hoàn thành crawl chuyên mục: ${articleType}`);
 
-// async function crawlCategory(maxPages: number = 5): Promise<Article[]> {
-//   const articles: Article[] = [];
+      if (parentPort) {
+        parentPort.postMessage({ type: 'done' });
+      }
+    } catch (error) {
+      console.error('[ERROR] Lỗi trong quá trình crawl:', error);
+      if (parentPort) {
+        parentPort.postMessage({
+          type: 'error',
+          data: { error: error.message },
+        });
+      }
+    }
+  }
 
-//   try {
-//     for (let page = 1; page <= maxPages; page++) {
-//       const pageUrl =
-//         page === 1 ? categoryUrl : `${categoryUrl}/trang-${page}.htm`;
+  private async crawlCategory(categoryUrl: string, maxPages = 5) {
+    try {
+      console.log(`[CRAWLING] Đang crawl chuyên mục: ${categoryUrl}`);
 
-//       const html = await rateLimiter.schedule(() =>
-//         axios.get(pageUrl).then((res) => res.data),
-//       );
+      for (let page = 1; page <= maxPages; page++) {
+        const pageUrl =
+          page === 1 ? categoryUrl : `${categoryUrl}/trang-${page}.htm`;
 
-//       const $ = cheerio.load(html);
+        try {
+          const response = await this.axiosInstance.get(pageUrl);
+          const $ = cheerio.load(response.data);
 
-//       // Crawl bài viết từ box-category-middle
-//       $('.box-category-middle .box-category-item').each((_, element) => {
-//         const article = parseArticle($, element);
-//         if (article) articles.push(article);
-//       });
-//     }
+          const articles = $('.box-category-middle .box-category-item')
+            .map((_, element) => this.parseArticle($, element))
+            .get()
+            .filter((article): article is Partial<Article> => article !== null);
 
-//     return articles;
-//   } catch (error) {
-//     console.error('Error crawling category:', error);
-//     throw error;
-//   }
-// }
+          console.log(
+            `[FOUND] Tìm thấy ${articles.length} bài viết trong trang ${page}`,
+          );
 
-// function parseArticle(
-//   $: cheerio.Root,
-//   element: cheerio.Element,
-// ): Article | null {
-//   try {
-//     const $element = $(element);
+          for (const article of articles) {
+            if (parentPort) {
+              console.log(`[SENDING] Gửi dữ liệu bài viết: ${article.title}`);
+              parentPort.postMessage({ type: 'article', data: article });
+            }
+          }
 
-//     // Lấy tiêu đề và URL
-//     const titleElement = $element.find('.box-title a');
-//     const title = titleElement.text().trim();
-//     const url = BASE_URL + titleElement.attr('href');
+          if (articles.length === 0) {
+            console.log(`[END] Không còn bài viết, dừng crawl`);
+            break;
+          }
 
-//     // Lấy mô tả
-//     const description = $element.find('.box-content-des').text().trim();
+          await this.delay(2000);
+        } catch (error) {
+          console.error(
+            `[ERROR] Lỗi crawl trang ${page}:`,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    } catch (error) {
+      console.error(
+        `[ERROR] Lỗi crawl chuyên mục ${categoryUrl}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
 
-//     // Lấy thời gian - nếu không tìm thấy thì dùng thời gian hiện tại
-//     const dateStr = $element.find('.box-time').text().trim();
-//     const publishDate = dateStr ? standardizeDate(dateStr) : new Date();
+  private parseArticle($: CheerioAPI, element: any): Partial<Article> | null {
+    try {
+      const $element = $(element);
 
-//     // Lấy ảnh thumbnail
-//     const thumbnail = $element.find('.img-resize img').attr('src') || '';
+      const titleElement = $element.find('.box-title a');
+      const title = titleElement.text().trim();
+      const url =
+        (workerData as WorkerData).BASE_URL + titleElement.attr('href');
+      const description = $element.find('.box-content-des').text().trim();
+      const dateStr = $element.find('.box-time').text().trim();
+      const publishDate = this.standardizeDate(dateStr);
+      const imageUrl = $element.find('.img-resize img').attr('src') || '';
 
-//     // Lấy category
-//     const category = categoryUrl.split('/').pop()?.replace('.htm', '') || '';
+      if (!title || !url) {
+        console.log(`[SKIP] Bỏ qua bài viết thiếu thông tin cần thiết`);
+        return null;
+      }
 
-//     return {
-//       id: 0,
-//       title,
-//       url,
-//       description,
-//       content: description,
-//       publishDate,
-//       thumbnail,
-//       imageUrl: thumbnail,
-//       source: 'tuoitre.vn',
-//       categoryId: 0,
-//       category: {
-//         id: 0,
-//         name: category,
-//         articles: [],
-//       } as Category,
-//     } as Article;
-//   } catch (error) {
-//     console.error('Error parsing article:', error);
-//     return null;
-//   }
-// }
+      console.log(`[PARSED] Đã parse thành công bài: ${title}`);
 
-// function standardizeDate(dateString: string): Date {
-//   try {
-//     const date = moment(dateString, [
-//       'DD/MM/YYYY HH:mm',
-//       'HH:mm DD/MM/YYYY',
-//       'DD/MM HH:mm',
-//     ]);
+      return {
+        title,
+        url,
+        description,
+        content: description,
+        publishDate,
+        imageUrl,
+        source: 'tuoitre.vn',
+        category: {
+          name: url.split('/')[3]?.replace('.htm', '') || '',
+        } as Category,
+      };
+    } catch (error) {
+      console.error(
+        '[ERROR] Lỗi parse bài viết:',
+        error instanceof Error ? error.message : String(error),
+      );
+      return null;
+    }
+  }
 
-//     if (date.isValid()) {
-//       return date.toDate();
-//     }
-//     return new Date(); // Trả về thời gian hiện tại nếu không parse được
-//   } catch (error) {
-//     console.error('Error standardizing date:', error);
-//     return new Date(); // Trả về thời gian hiện tại nếu có lỗi
-//   }
-// }
+  private standardizeDate(dateString: string): Date {
+    try {
+      console.log(`[DATE] Chuẩn hóa ngày: ${dateString}`);
+      const date = moment(dateString, [
+        'DD/MM/YYYY HH:mm',
+        'HH:mm DD/MM/YYYY',
+        'DD/MM HH:mm',
+      ]);
 
-// // Bắt đầu crawl
-// crawlCategory()
-//   .then((articles) => {
-//     parentPort?.postMessage({ type: 'success', data: articles });
-//   })
-//   .catch((error) => {
-//     parentPort?.postMessage({ type: 'error', error: error.message });
-//   });
+      if (date.isValid()) {
+        console.log(
+          `[DATE] Kết quả chuẩn hóa: ${date.format('YYYY-MM-DD HH:mm:ss')}`,
+        );
+        return date.toDate();
+      }
+      return new Date();
+    } catch (error) {
+      console.error(
+        '[ERROR] Lỗi chuẩn hóa ngày:',
+        error instanceof Error ? error.message : String(error),
+      );
+      return new Date();
+    }
+  }
+
+  async searchByKeyword(keyword: string, maxPages = 5) {
+    try {
+      console.log(`[SEARCH] Bắt đầu tìm kiếm với từ khóa: ${keyword}`);
+
+      for (let page = 1; page <= maxPages; page++) {
+        console.log(`[SEARCH] Đang tìm kiếm trang ${page}/${maxPages}`);
+
+        const searchUrl = `${(workerData as WorkerData).BASE_URL}tim-kiem.htm?q=${encodeURIComponent(keyword)}&page=${page}`;
+
+        try {
+          const response = await this.axiosInstance.get(searchUrl);
+          const $ = cheerio.load(response.data);
+
+          const articles = $('.box-search-result .box-category-item')
+            .map((_, element) => {
+              const article = this.parseArticle($, element);
+              if (article) {
+                const similarity = this.calculateRelevance(
+                  article.title + ' ' + article.description,
+                  keyword,
+                );
+                if (similarity > 0.3) {
+                  console.log(
+                    `[MATCH] Tìm thấy bài viết phù hợp: ${article.title} (độ tương đồng: ${similarity})`,
+                  );
+                  return { ...article, similarity };
+                }
+                console.log(
+                  `[SKIP] Bỏ qua bài viết do độ tương đồng thấp: ${article.title}`,
+                );
+              }
+              return null;
+            })
+            .get()
+            .filter(
+              (article): article is Partial<Article> & { similarity: number } =>
+                article !== null,
+            );
+
+          if (articles.length > 0) {
+            console.log(
+              `[FOUND] Tìm thấy ${articles.length} bài viết phù hợp trên trang ${page}`,
+            );
+            if (parentPort) {
+              parentPort.postMessage({
+                type: 'searchResult',
+                data: articles,
+              });
+            }
+          }
+
+          if (articles.length === 0) {
+            console.log(`[END] Không còn kết quả phù hợp, dừng tìm kiếm`);
+            break;
+          }
+
+          console.log(`[DELAY] Đợi 2 giây trước khi tìm trang tiếp theo`);
+          await this.delay(2000);
+        } catch (error) {
+          console.error(
+            '[SEARCH_ERROR] Lỗi trong quá trình tìm kiếm:',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    } catch (error) {
+      if (parentPort) {
+        parentPort.postMessage({
+          type: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  private calculateRelevance(text: string, keyword: string): number {
+    const normalizedText = text.toLowerCase();
+    const normalizedKeyword = keyword.toLowerCase();
+
+    if (normalizedText.includes(normalizedKeyword)) return 1;
+
+    const words = normalizedText.split(/\s+/);
+    const keywordWords = normalizedKeyword.split(/\s+/);
+    let matches = 0;
+
+    keywordWords.forEach((kw) => {
+      if (words.some((w) => w.includes(kw))) matches++;
+    });
+
+    return matches / keywordWords.length;
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
+
+// Initialize worker
+const worker = new TuoiTreWorker();
+const typedWorkerData = workerData as WorkerData;
+
+// Handle worker messages
+if (typedWorkerData.mode === 'search' && typedWorkerData.keyword) {
+  worker.searchByKeyword(typedWorkerData.keyword, typedWorkerData.maxPages);
+} else if (typedWorkerData.mode === 'crawl') {
+  worker.startCrawling();
+} else {
+  throw new Error('Invalid worker mode or missing required data');
+}

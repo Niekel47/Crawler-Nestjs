@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Article } from '../models/article.entity';
 import { ConfigService } from '@nestjs/config';
-import { Worker } from 'worker_threads';
+// import { Worker } from 'worker_threads';
 import * as path from 'path';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Category } from '../models/category.entity';
@@ -14,6 +14,9 @@ import { RedisService } from '../redis/redis.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import * as xml2js from 'xml2js';
+import axios, { AxiosInstance } from 'axios';
+import { ElasticsearchService } from 'src/elasticsearch/elasticsearch.service';
 
 @Injectable()
 export class WebCrawlerService implements OnModuleInit {
@@ -21,6 +24,7 @@ export class WebCrawlerService implements OnModuleInit {
   private isRunning = false;
   private readonly maxRetries = 3;
   private readonly retryDelay = 5000;
+  private readonly axiosInstance: AxiosInstance;
 
   private readonly articleTypes = {
     0: 'thoi-su',
@@ -46,11 +50,23 @@ export class WebCrawlerService implements OnModuleInit {
     private readonly logger: LoggingService,
     private readonly redisService: RedisService,
     private readonly metricsService: MetricsService,
-  ) {}
+    private readonly elasticsearchService: ElasticsearchService,
+  ) {
+    this.axiosInstance = axios.create({
+      timeout: 30000,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      },
+      maxRedirects: 5,
+    });
+  }
 
   onModuleInit() {
     // Uncomment to start crawling on init
-    // this.startCrawling();
+    this.startCrawling();
   }
 
   @Cron(CronExpression.EVERY_10_MINUTES)
@@ -180,7 +196,18 @@ export class WebCrawlerService implements OnModuleInit {
       retries = 0;
       while (retries < this.maxRetries) {
         try {
-          await this.articleRepository.save(article);
+          const savedArticle = await this.articleRepository.save(article);
+
+          // Index in Elasticsearch
+          // await this.elasticsearchService.indexArticle(savedArticle);
+
+          // Update cache and metrics
+          await this.redisService.set(cacheKey, savedArticle);
+          this.metricsService.incrementCrawlCount('vnexpress');
+
+          this.logger.log(
+            `Đã lưu và đánh chỉ mục bài viết mới từ Vnexpress: ${savedArticle.title}`,
+          );
           break;
         } catch (error) {
           if (error.code === '23505') {
@@ -194,12 +221,6 @@ export class WebCrawlerService implements OnModuleInit {
           await this.delay(this.retryDelay * retries);
         }
       }
-
-      // Update cache and metrics
-      await this.redisService.set(cacheKey, article);
-      this.metricsService.incrementCrawlCount('vnexpress');
-
-      this.logger.log(`Đã lưu bài viết mới từ Vnexpress: ${articleData.title}`);
     } catch (error) {
       this.logger.error(
         `Error saving article: ${articleData.title}`,
@@ -232,7 +253,15 @@ export class WebCrawlerService implements OnModuleInit {
     }
   }
 
-  async searchByKeyword(keyword: string, maxPages = 5) {
+  async searchByKeyword(
+    keyword: string,
+    filters?: {
+      source?: string;
+      category?: string;
+      fromDate?: Date;
+      toDate?: Date;
+    },
+  ) {
     if (this.isRunning) {
       this.logger.warn('Crawler is busy');
       return;
@@ -244,7 +273,7 @@ export class WebCrawlerService implements OnModuleInit {
     try {
       const cacheKey = this.redisService.generateKey(
         'vnexpress-search',
-        keyword,
+        keyword + JSON.stringify(filters || {}),
       );
       const cachedResults = await this.redisService.get(cacheKey);
 
@@ -253,49 +282,15 @@ export class WebCrawlerService implements OnModuleInit {
         return cachedResults;
       }
 
-      let retries = 0;
-      while (retries < this.maxRetries) {
-        try {
-          const worker = new Worker(path.join(__dirname, 'crawler.worker.js'), {
-            workerData: {
-              keyword,
-              maxPages,
-              BASE_URL: this.BASE_URL,
-              mode: 'search',
-            },
-          });
+      // Search using Elasticsearch
+      const results = await this.elasticsearchService.searchArticles(
+        keyword,
+        filters,
+      );
 
-          const results = await new Promise((resolve, reject) => {
-            const searchResults = [];
-
-            worker.on('message', (message) => {
-              if (message.type === 'searchResult') {
-                searchResults.push(...message.data);
-              }
-            });
-
-            worker.on('error', reject);
-            worker.on('exit', (code) => {
-              if (code !== 0) {
-                reject(new Error(`Worker stopped with exit code ${code}`));
-              } else {
-                resolve(searchResults);
-              }
-            });
-          });
-
-          await this.redisService.set(cacheKey, results, 3600); // Cache for 1 hour
-          return results;
-        } catch (error) {
-          retries++;
-          this.logger.error(
-            `Search error (attempt ${retries}/${this.maxRetries})`,
-            error.stack,
-          );
-          if (retries === this.maxRetries) throw error;
-          await this.delay(this.retryDelay * retries);
-        }
-      }
+      // Cache results for 1 hour
+      await this.redisService.set(cacheKey, results, 3600);
+      return results;
     } catch (error) {
       this.logger.error('Search error', error.stack);
       throw error;
@@ -371,5 +366,143 @@ export class WebCrawlerService implements OnModuleInit {
   stopCrawling() {
     this.isRunning = false;
     this.logger.log('Crawler stopped');
+  }
+
+  async crawlFromSitemap(year: number, limit: number) {
+    if (this.isRunning) {
+      this.logger.warn('Crawler is already running');
+      return;
+    }
+
+    this.isRunning = true;
+    this.logger.log(`Starting sitemap crawl for year ${year}...`);
+
+    try {
+      const timer = this.metricsService.startCrawlTimer('vnexpress-sitemap');
+
+      // Get main sitemap
+      const mainSitemapUrl = 'https://vnexpress.net/sitemap.xml';
+      const mainSitemapResponse = await this.axiosInstance.get(mainSitemapUrl);
+
+      // Configure XML parser with more lenient options
+      const parser = new xml2js.Parser({
+        trim: true,
+        normalize: true,
+        normalizeTags: true,
+        strict: false,
+        explicitArray: false,
+      });
+
+      const mainSitemapData = await parser.parseStringPromise(
+        mainSitemapResponse.data,
+      );
+
+      // Find the articles sitemap for the specified year
+      const sitemaps = Array.isArray(mainSitemapData.sitemapindex.sitemap)
+        ? mainSitemapData.sitemapindex.sitemap
+        : [mainSitemapData.sitemapindex.sitemap];
+
+      const yearSitemap = sitemaps.find(
+        (sitemap) =>
+          sitemap.loc && sitemap.loc.includes(`articles-${year}-sitemap.xml`),
+      );
+
+      if (!yearSitemap || !yearSitemap.loc) {
+        throw new Error(`No sitemap found for year ${year}`);
+      }
+
+      // Get the year's sitemap
+      const yearSitemapResponse = await this.axiosInstance.get(yearSitemap.loc);
+      const yearSitemapData = await parser.parseStringPromise(
+        yearSitemapResponse.data,
+      );
+
+      // Get article URLs
+      const urlset = yearSitemapData.urlset;
+      if (!urlset || !urlset.url) {
+        throw new Error(
+          'Invalid sitemap format: missing urlset or url entries',
+        );
+      }
+
+      // Handle both array and single url cases
+      const urlEntries = Array.isArray(urlset.url) ? urlset.url : [urlset.url];
+
+      // Filter valid URLs and extract loc values
+      const articleUrls = urlEntries
+        .filter((entry) => entry && typeof entry === 'object' && entry.loc)
+        .map((entry) =>
+          typeof entry.loc === 'string' ? entry.loc : entry.loc[0],
+        )
+        .filter((url) => url && typeof url === 'string')
+        .slice(0, limit);
+
+      if (articleUrls.length === 0) {
+        throw new Error('No valid article URLs found in sitemap');
+      }
+
+      this.logger.log(`Found ${articleUrls.length} articles in sitemap`);
+
+      // Queue each URL for crawling
+      for (const url of articleUrls) {
+        let retries = 0;
+        while (retries < this.maxRetries) {
+          try {
+            await this.queueSitemapCrawlJob(url);
+            break;
+          } catch (error) {
+            retries++;
+            this.logger.error(
+              `Error queuing job for ${url} (attempt ${retries}/${this.maxRetries})`,
+              error.stack,
+            );
+            if (retries < this.maxRetries) {
+              await this.delay(this.retryDelay * retries);
+            }
+          }
+        }
+        await this.delay(1000); // Delay between queueing jobs
+      }
+
+      timer();
+      this.logger.log('Sitemap crawl completed successfully');
+      return { message: `Queued ${articleUrls.length} articles for crawling` };
+    } catch (error) {
+      this.logger.error('Error during sitemap crawling', error.stack);
+      throw error;
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  private async queueSitemapCrawlJob(url: string) {
+    try {
+      const job = await this.crawlerQueue.add(
+        'crawl-sitemap',
+        {
+          url,
+          mode: 'sitemap',
+          workerPath: path.join(__dirname, 'sitemap.worker.js'),
+        },
+        {
+          attempts: this.maxRetries,
+          backoff: {
+            type: 'exponential',
+            delay: this.retryDelay,
+          },
+          removeOnComplete: true,
+          timeout: 300000, // 5 minutes timeout
+        },
+      );
+
+      this.logger.log(`Queued sitemap job ${job.id} for ${url}`);
+      return job;
+    } catch (error) {
+      this.logger.error(
+        `Error queuing sitemap crawl job for ${url}`,
+        error.stack,
+      );
+      throw error;
+    }
   }
 }

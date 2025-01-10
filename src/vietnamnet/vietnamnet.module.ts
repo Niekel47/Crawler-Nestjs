@@ -13,6 +13,7 @@ import { BullModule } from '@nestjs/bull';
 import { LoggingModule } from 'src/logging/logging.module';
 import { UtilsModule } from 'src/utils/utils.module';
 import { MetricsModule } from 'src/metrics/metrics.module';
+import { ElasticsearchService } from 'src/elasticsearch/elasticsearch.service';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { MetricsModule } from 'src/metrics/metrics.module';
     SearchService,
     VietnamnetProcessor,
     RedisService,
+    ElasticsearchService,
   ],
   exports: [VietnamnetService],
 })

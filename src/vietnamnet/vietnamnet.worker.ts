@@ -16,7 +16,7 @@ export class VietnamnetWorker {
   private readonly retryDelay = 3000;
   private readonly maxRetries = 3;
   private articleCount = 0;
-  private readonly maxArticles = 100;
+  private readonly maxArticles = 200;
 
   constructor() {
     this.axiosInstance = axios.create({
@@ -93,10 +93,10 @@ export class VietnamnetWorker {
 
       // Process each article
       for (const articleUrl of articleLinks) {
-        if (this.articleCount >= this.maxArticles) {
-          console.log(`Reached maximum articles limit (${this.maxArticles})`);
-          break;
-        }
+        // if (this.articleCount >= this.maxArticles) {
+        //   console.log(`Reached maximum articles limit (${this.maxArticles})`);
+        //   break;
+        // }
 
         try {
           const article = await this.processArticle(articleUrl);
@@ -114,7 +114,7 @@ export class VietnamnetWorker {
         }
 
         // Delay between article processing
-        await delay(1000);
+        await delay(5000);
       }
     } catch (error) {
       console.error(`Error crawling category ${categoryUrl}:`, error.message);

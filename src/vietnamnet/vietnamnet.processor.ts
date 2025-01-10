@@ -6,14 +6,14 @@ import { VietnamnetService } from './vietnamnet.service';
 import { Worker } from 'worker_threads';
 import * as path from 'path';
 
-@Processor('vietnamnet-crawler')
+// @Processor('vietnamnet-crawler')
 export class VietnamnetProcessor {
   constructor(
     private readonly logger: LoggingService,
     private readonly vietnamnetService: VietnamnetService,
   ) {}
 
-  @Process('crawl')
+  // @Process('crawl')
   async handleCrawl(job: Job) {
     try {
       this.logger.log(`Processing VietnamNet crawl job ${job.id}`);

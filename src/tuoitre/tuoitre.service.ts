@@ -1,217 +1,389 @@
-// import { Injectable, OnModuleInit } from '@nestjs/common';
-// import { InjectRepository } from '@nestjs/typeorm';
-// import { Repository } from 'typeorm';
-// import { Article } from '../models/article.entity';
-// import { ConfigService } from '@nestjs/config';
-// import { Worker } from 'worker_threads';
-// import * as path from 'path';
-// import { Cron, CronExpression } from '@nestjs/schedule';
-// import { Category } from '../models/category.entity';
-// import { ArticlesPaginationResult } from 'src/crawler/type';
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Article } from '../models/article.entity';
+import { ConfigService } from '@nestjs/config';
+import { Worker } from 'worker_threads';
+import * as path from 'path';
+import { Category } from '../models/category.entity';
+import { LoggingService } from '../logging/logging.service';
+import { RedisService } from '../redis/redis.service';
+import { MetricsService } from '../metrics/metrics.service';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { ArticlesPaginationResult } from '../crawler/type';
 
-// @Injectable()
-// export class TuoiTreService implements OnModuleInit {
-//   private urlCache: Map<string, Date> = new Map();
-//   private readonly CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
-//   private readonly BASE_URL = 'https://tuoitre.vn/';
-//   private isRunning = false;
+@Injectable()
+export class TuoiTreService implements OnModuleInit {
+  private readonly BASE_URL = 'https://tuoitre.vn/';
+  private isRunning = false;
+  private readonly maxRetries = 3;
+  private readonly retryDelay = 5000;
 
-//   constructor(
-//     @InjectRepository(Article)
-//     private articleRepository: Repository<Article>,
-//     @InjectRepository(Category)
-//     private categoryRepository: Repository<Category>,
-//     private configService: ConfigService,
-//   ) {}
+  private readonly articleTypes = {
+    0: 'thoi-su',
+    1: 'the-gioi',
+    2: 'phap-luat',
+    3: 'kinh-doanh',
+    4: 'cong-nghe',
+    5: 'xe',
+    6: 'nhip-song-tre',
+    7: 'van-hoa',
+    8: 'giai-tri',
+    9: 'the-thao',
+    10: 'giao-duc',
+    11: 'khoa-hoc',
+    12: 'suc-khoe',
+  };
 
-//   onModuleInit() {
-//     // this.startCrawling();
-//   }
+  constructor(
+    @InjectRepository(Article)
+    private articleRepository: Repository<Article>,
+    @InjectRepository(Category)
+    private categoryRepository: Repository<Category>,
+    @InjectQueue('tuoitre-crawler') private readonly crawlerQueue: Queue,
+    private readonly configService: ConfigService,
+    private readonly logger: LoggingService,
+    private readonly redisService: RedisService,
+    private readonly metricsService: MetricsService,
+  ) {}
 
-//   private async initializeCategories() {
-//     const categories = [
-//       { name: 'thoi-su', url: 'thoi-su.htm' },
-//       { name: 'the-gioi', url: 'the-gioi.htm' },
-//       { name: 'phap-luat', url: 'phap-luat.htm' },
-//       { name: 'kinh-doanh', url: 'kinh-doanh.htm' },
-//       { name: 'cong-nghe', url: 'cong-nghe.htm' },
-//       { name: 'xe', url: 'xe.htm' },
-//       { name: 'nhip-song-tre', url: 'nhip-song-tre.htm' },
-//       { name: 'van-hoa', url: 'van-hoa.htm' },
-//       { name: 'giai-tri', url: 'giai-tri.htm' },
-//       { name: 'the-thao', url: 'the-thao.htm' },
-//       { name: 'giao-duc', url: 'giao-duc.htm' },
-//       { name: 'khoa-hoc', url: 'khoa-hoc.htm' },
-//       { name: 'suc-khoe', url: 'suc-khoe.htm' },
-//       { name: 'gia-that', url: 'gia-that.htm' },
-//       { name: 'ban-doc-lam-bao', url: 'ban-doc-lam-bao.htm' },
-//       { name: 'du-lich', url: 'du-lich.htm' },
-//     ];
+  onModuleInit() {
+    // Uncomment to start crawling on init
+    this.startCrawling();
+  }
 
-//     for (const category of categories) {
-//       await this.getOrCreateCategory(category.name);
-//     }
-//   }
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async scheduledCrawling() {
+    this.logger.log('Starting scheduled Tuoi Tre crawl...');
+    await this.startCrawling();
+  }
 
-//   @Cron(CronExpression.EVERY_HOUR)
-//   async scheduledCrawling() {
-//     console.log('Bắt đầu crawl Tuổi Trẻ theo lịch...');
-//     await this.startCrawling();
-//   }
+  async startCrawling() {
+    if (this.isRunning) {
+      this.logger.warn('Tuoi Tre crawler is already running');
+      return;
+    }
 
-//   public async startCrawling() {
-//     if (this.isRunning) {
-//       console.log('Tuổi Trẻ crawler đang chạy');
-//       return;
-//     }
+    this.isRunning = true;
+    this.logger.log('Starting Tuoi Tre crawler...');
 
-//     this.isRunning = true;
-//     console.log('Bắt đầu crawler Tuổi Trẻ...');
+    try {
+      const timer = this.metricsService.startCrawlTimer('tuoitre');
 
-//     try {
-//       await this.initializeCategories();
+      for (const [, articleType] of Object.entries(this.articleTypes)) {
+        let retries = 0;
+        while (retries < this.maxRetries) {
+          try {
+            await this.queueCrawlJob(articleType);
+            break;
+          } catch (error) {
+            retries++;
+            this.logger.error(
+              `Error queuing job for ${articleType} (attempt ${retries}/${this.maxRetries})`,
+              error.stack,
+            );
+            if (retries < this.maxRetries) {
+              await this.delay(this.retryDelay * retries);
+            }
+          }
+        }
+      }
 
-//       const categories = await this.categoryRepository.find();
-//       const crawlPromises = categories.map((category) =>
-//         this.crawlCategory(category),
-//       );
+      timer();
+      this.logger.log('Tuoi Tre crawl completed successfully');
+    } catch (error) {
+      this.logger.error('Error during Tuoi Tre crawling', error.stack);
+    } finally {
+      this.isRunning = false;
+    }
+  }
 
-//       await Promise.all(crawlPromises);
+  private async queueCrawlJob(articleType: string) {
+    try {
+      const job = await this.crawlerQueue.add(
+        'crawl',
+        {
+          articleType,
+          BASE_URL: this.BASE_URL,
+          mode: 'crawl',
+        },
+        {
+          attempts: this.maxRetries,
+          backoff: {
+            type: 'exponential',
+            delay: this.retryDelay,
+          },
+          removeOnComplete: true,
+          timeout: 300000, // 5 minutes timeout
+        },
+      );
 
-//       console.log('Hoàn thành crawler Tuổi Trẻ');
-//     } catch (error) {
-//       console.error('Lỗi trong quá trình crawl Tuổi Trẻ:', error);
-//     } finally {
-//       this.isRunning = false;
-//     }
-//   }
+      this.logger.log(`Queued job ${job.id} for ${articleType}`);
+      return job;
+    } catch (error) {
+      this.logger.error(
+        `Error queuing crawl job for ${articleType}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
 
-//   private async crawlCategory(category: Category) {
-//     return new Promise<void>((resolve, reject) => {
-//       const worker = new Worker(path.join(__dirname, 'tuoitre.worker.js'), {
-//         workerData: {
-//           categoryUrl: `${this.BASE_URL}${category.name}.htm`,
-//           BASE_URL: this.BASE_URL,
-//         },
-//       });
+  async saveArticle(articleData: Partial<Article>) {
+    const cacheKey = this.redisService.generateKey(
+      'tuoitre-article',
+      articleData.url,
+    );
 
-//       worker.on('message', async (message) => {
-//         if (message.type === 'article') {
-//           await this.saveArticle(message.data, category);
-//         }
-//       });
+    try {
+      this.logger.log(
+        `[SAVE_START] Bắt đầu xử lý lưu bài viết: ${articleData.title}`,
+      );
 
-//       worker.on('error', reject);
-//       worker.on('exit', (code) => {
-//         if (code !== 0) {
-//           reject(new Error(`Worker stopped with exit code ${code}`));
-//         } else {
-//           resolve();
-//         }
-//       });
-//     });
-//   }
+      // Check cache first
+      if (await this.redisService.exists(cacheKey)) {
+        this.logger.log(
+          `[CACHE_SKIP] Bài viết đã tồn tại trong cache: ${articleData.title}`,
+        );
+        return;
+      }
+      this.logger.log(
+        `[CACHE_CHECK] Bài viết chưa có trong cache: ${articleData.title}`,
+      );
 
-//   private async saveArticle(articleData: Partial<Article>, category: Category) {
-//     if (this.isCached(articleData.url)) {
-//       console.log(`Bỏ qua bài viết đã cache: ${articleData.url}`);
-//       return;
-//     }
+      // Check if article already exists in database
+      const existingArticle = await this.articleRepository.findOne({
+        where: { url: articleData.url },
+      });
 
-//     try {
-//       const existingArticle = await this.articleRepository.findOne({
-//         where: { url: articleData.url },
-//       });
+      if (existingArticle) {
+        this.logger.log(
+          `[DB_SKIP] Bài viết đã tồn tại trong database: ${articleData.title}`,
+        );
+        return;
+      }
+      this.logger.log(
+        `[DB_CHECK] Bài viết chưa có trong database: ${articleData.title}`,
+      );
 
-//       if (!existingArticle) {
-//         const article = this.articleRepository.create({
-//           ...articleData,
-//           category: category,
-//           source: this.BASE_URL,
-//         });
-//         await this.articleRepository.save(article);
-//         console.log(`Đã lưu bài viết mới của Tuổi Trẻ: ${articleData.title}`);
-//         this.addToCache(articleData.url);
-//       } else {
-//         console.log(`Bài viết đã tồn tại: ${articleData.title}`);
-//       }
-//     } catch (error) {
-//       if (error.code === '23505') {
-//         console.log(
-//           `Bài viết đã tồn tại (concurrent insert): ${articleData.title}`,
-//         );
-//       } else {
-//         console.error(`Lỗi khi lưu bài viết: ${articleData.title}`, error);
-//       }
-//     }
-//   }
+      // Get or create category
+      this.logger.log(
+        `[CATEGORY_START] Đang xử lý category cho bài: ${articleData.title}`,
+      );
+      const category = await this.getOrCreateCategory(
+        articleData.category as unknown as string,
+      );
+      this.logger.log(
+        `[CATEGORY_DONE] Đã xử lý xong category: ${category.name}`,
+      );
 
-//   private async getOrCreateCategory(categoryName: string): Promise<Category> {
-//     try {
-//       let category = await this.categoryRepository.findOne({
-//         where: { name: categoryName },
-//       });
-//       if (!category) {
-//         category = this.categoryRepository.create({
-//           name: categoryName,
-//         });
-//         await this.categoryRepository.save(category);
-//       }
-//       return category;
-//     } catch (error) {
-//       if (error.code === '23505') {
-//         return await this.categoryRepository.findOne({
-//           where: { name: categoryName },
-//         });
-//       }
-//       throw error;
-//     }
-//   }
+      // Create new article
+      this.logger.log(
+        `[DB_SAVE_START] Đang lưu bài viết vào database: ${articleData.title}`,
+      );
+      const article = this.articleRepository.create({
+        ...articleData,
+        category,
+        source: this.BASE_URL,
+      });
 
-//   private isCached(url: string): boolean {
-//     const cachedTime = this.urlCache.get(url);
-//     if (cachedTime && Date.now() - cachedTime.getTime() < this.CACHE_DURATION) {
-//       return true;
-//     }
-//     return false;
-//   }
+      // Save article
+      await this.articleRepository.save(article);
+      this.logger.log(
+        `[DB_SAVE_SUCCESS] Đã lưu thành công vào database: ${articleData.title}`,
+      );
 
-//   private addToCache(url: string) {
-//     this.urlCache.set(url, new Date());
-//   }
+      // Update cache and metrics
+      this.logger.log(
+        `[CACHE_UPDATE] Đang cập nhật cache cho bài viết: ${articleData.title}`,
+      );
+      await this.redisService.set(cacheKey, article);
+      this.logger.log(
+        `[CACHE_UPDATED] Đã cập nhật cache thành công: ${articleData.title}`,
+      );
 
-//   async getArticles(
-//     page: number,
-//     limit: number,
-//     category?: string,
-//   ): Promise<ArticlesPaginationResult> {
-//     const queryBuilder = this.articleRepository
-//       .createQueryBuilder('article')
-//       .leftJoinAndSelect('article.category', 'category')
-//       .orderBy('article.publishDate', 'DESC');
+      this.metricsService.incrementCrawlCount('tuoitre');
+      this.logger.log(
+        `[METRICS_UPDATED] Đã cập nhật metrics cho bài viết: ${articleData.title}`,
+      );
 
-//     if (category) {
-//       queryBuilder.where('category.name = :category', { category });
-//     }
+      this.logger.log(
+        `[SAVE_SUCCESS] Hoàn thành toàn bộ quá trình lưu bài viết: ${articleData.title} - Category: ${category.name}`,
+      );
+    } catch (error) {
+      if (error.code === '23505') {
+        this.logger.warn(
+          `[DUPLICATE] Bài viết bị trùng lặp (concurrent insert): ${articleData.title}`,
+        );
+      } else {
+        this.logger.error(
+          `[SAVE_ERROR] Lỗi khi lưu bài viết: ${articleData.title}`,
+          error.stack,
+        );
+      }
+    }
+  }
 
-//     const [articles, total] = await queryBuilder
-//       .skip((page - 1) * limit)
-//       .take(limit)
-//       .getManyAndCount();
+  private async getOrCreateCategory(categoryName: string): Promise<Category> {
+    try {
+      let category = await this.categoryRepository.findOne({
+        where: { name: categoryName },
+      });
 
-//     return {
-//       data: articles,
-//       total,
-//       page,
-//       limit,
-//       totalPages: Math.ceil(total / limit),
-//     };
-//   }
+      if (!category) {
+        category = this.categoryRepository.create({ name: categoryName });
+        await this.categoryRepository.save(category);
+        this.logger.log(`Created new category: ${categoryName}`);
+      }
 
-//   async getArticleById(id: number): Promise<Article> {
-//     return await this.articleRepository.findOne({
-//       where: { id },
-//       relations: ['category'],
-//     });
-//   }
-// }
+      return category;
+    } catch (error) {
+      if (error.code === '23505') {
+        return await this.categoryRepository.findOne({
+          where: { name: categoryName },
+        });
+      }
+      throw error;
+    }
+  }
+
+  async searchByKeyword(keyword: string, maxPages = 5) {
+    if (this.isRunning) {
+      this.logger.warn('Tuoi Tre crawler is busy');
+      return;
+    }
+
+    this.isRunning = true;
+    this.logger.log(`Starting search for keyword: ${keyword}`);
+
+    try {
+      const cacheKey = this.redisService.generateKey('tuoitre-search', keyword);
+      const cachedResults = await this.redisService.get(cacheKey);
+
+      if (cachedResults) {
+        this.logger.debug(`Returning cached search results for: ${keyword}`);
+        return cachedResults;
+      }
+
+      let retries = 0;
+      while (retries < this.maxRetries) {
+        try {
+          const worker = new Worker(path.join(__dirname, 'tuoitre.worker.js'), {
+            workerData: {
+              keyword,
+              maxPages,
+              BASE_URL: this.BASE_URL,
+              mode: 'search',
+            },
+          });
+
+          const results = await new Promise((resolve, reject) => {
+            const searchResults = [];
+
+            worker.on('message', (message) => {
+              if (message.type === 'searchResult') {
+                searchResults.push(...message.data);
+              }
+            });
+
+            worker.on('error', reject);
+            worker.on('exit', (code) => {
+              if (code !== 0) {
+                reject(new Error(`Worker stopped with exit code ${code}`));
+              } else {
+                resolve(searchResults);
+              }
+            });
+          });
+
+          await this.redisService.set(cacheKey, results, 3600); // Cache for 1 hour
+          return results;
+        } catch (error) {
+          retries++;
+          this.logger.error(
+            `Search error (attempt ${retries}/${this.maxRetries})`,
+            error.stack,
+          );
+          if (retries === this.maxRetries) throw error;
+          await this.delay(this.retryDelay * retries);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Search error', error.stack);
+      throw error;
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async getArticles(page = 1, limit = 10): Promise<ArticlesPaginationResult> {
+    const [items, total] = await this.articleRepository.findAndCount({
+      relations: ['category'],
+      order: { publishDate: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async getArticleById(id: number): Promise<Article | undefined> {
+    return this.articleRepository.findOne({
+      where: { id },
+      relations: ['category'],
+    });
+  }
+
+  async getArticlesByCategory(
+    categoryName: string,
+    page = 1,
+    limit = 10,
+  ): Promise<ArticlesPaginationResult> {
+    const category = await this.categoryRepository.findOne({
+      where: { name: categoryName },
+    });
+
+    if (!category) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+      };
+    }
+
+    const [items, total] = await this.articleRepository.findAndCount({
+      where: { category: { id: category.id } },
+      relations: ['category'],
+      order: { publishDate: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  stopCrawling() {
+    this.isRunning = false;
+    this.logger.log('Tuoi Tre crawler stopped');
+  }
+}

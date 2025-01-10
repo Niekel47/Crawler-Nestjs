@@ -19,7 +19,9 @@ export class ContentProcessorService {
     const $ = cheerio.load(html);
 
     // Remove unwanted elements
-    $('script, style, iframe, nav, header, footer, .advertisement').remove();
+    $(
+      'script, style, iframe, nav, header, footer, .advertisement, em',
+    ).remove();
 
     // Get text content
     const text = $('body').text();

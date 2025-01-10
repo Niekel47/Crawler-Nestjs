@@ -25,7 +25,8 @@ import { RateLimitMiddleware } from './middleware/rate-limit.middleware';
 import { RedisService } from './redis/redis.service';
 import { LoggingService } from './logging/logging.service';
 import { ContentAnalyzerService } from './content_analyzer/content_analyzer.service';
-// import { TuoitreModule } from './tuoitre/tuoitre.module';
+import { TuoitreModule } from './tuoitre/tuoitre.module';
+import { GoogleSearchModule } from './google search/google-search.module';
 
 @Module({
   imports: [
@@ -53,7 +54,8 @@ import { ContentAnalyzerService } from './content_analyzer/content_analyzer.serv
     RoleModule,
     TwentyFourHModule,
     MetricsModule,
-    // TuoitreModule,
+    TuoitreModule,
+    GoogleSearchModule,
   ],
 
   providers: [
