@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as path from 'path';
@@ -9,38 +9,20 @@ import * as vntk from 'vntk';
 
 @Injectable()
 export class GoogleSearchService {
+  private readonly logger = new Logger(GoogleSearchService.name);
   private readonly SITE_LIST = [
-    // 'https://tuoitre.vn',
-    // 'https://nld.com.vn',
-    // 'https://tienphong.vn',
-    // 'https://dantri.com.vn',
-    // 'https://zingnews.vn',
-    // 'https://vietnamnet.vn',
-    // 'https://vov.vn',
-    // 'https://laodong.vn',
-    // 'https://www.sggp.org.vn',
-    // 'https://plo.vn',
-    // 'https://nhandan.vn',
-    // 'https://baochinhphu.vn',
-    // 'https://vtv.vn',
-    // 'https://vneconomy.vn',
-    // 'https://cafef.vn',
-    // 'https://vietbao.vn',
-    // 'https://kenh14.vn',
-    // 'https://soha.vn',
-    // 'https://genk.vn',
+    'https://tuoitre.vn',
+    'https://nld.com.vn',
     'https://vnexpress.net',
-    // 'https://baomoi.com',
-    // 'https://thanhnien.vn',
-    // 'https://www.msn.com/vi-vn',
-    // 'https://luatduonggia.vn/',
-    // 'https://vi.wikipedia.org/',
-    // 'https://vnur.vn/',
+    'https://thanhnien.vn',
+    'https://dantri.com.vn',
   ];
 
   private readonly wordTokenizer;
   private readonly posTag;
   private readonly dictionary;
+  private readonly util;
+  private readonly bayesClassifier;
 
   private readonly STOP_WORDS = new Set([
     'là',
@@ -99,35 +81,166 @@ export class GoogleSearchService {
     'trực tiếp',
   ]);
 
-  private readonly NAME_PREFIXES = new Set([
-    'lebron',
-    'kevin',
-    'stephen',
-    'james',
-    'durant',
-    'curry',
-  ]);
+  private readonly MAIN_CATEGORIES = {
+    POLITICS: 'Chính trị',
+    ECONOMY: 'Kinh tế',
+    SOCIETY: 'Xã hội',
+    CULTURE: 'Văn hóa',
+    SPORTS: 'Thể thao',
+    TECHNOLOGY: 'Công nghệ',
+    EDUCATION: 'Giáo dục',
+    HEALTH: 'Y tế',
+    ENVIRONMENT: 'Môi trường',
+    WORLD: 'Thế giới',
+  };
+
+  private readonly CATEGORY_KEYWORDS = {
+    POLITICS: [
+      'chính phủ',
+      'quốc hội',
+      'đảng',
+      'nghị quyết',
+      'chính sách',
+      'lãnh đạo',
+      'đại biểu',
+      'bộ trưởng',
+    ],
+    ECONOMY: [
+      'kinh tế',
+      'tài chính',
+      'thị trường',
+      'doanh nghiệp',
+      'đầu tư',
+      'xuất khẩu',
+      'nhập khẩu',
+      'gdp',
+    ],
+    SOCIETY: [
+      'xã hội',
+      'dân sinh',
+      'đời sống',
+      'cộng đồng',
+      'an sinh',
+      'phúc lợi',
+    ],
+    CULTURE: [
+      'văn hóa',
+      'nghệ thuật',
+      'di sản',
+      'lễ hội',
+      'truyền thống',
+      'điện ảnh',
+      'âm nhạc',
+    ],
+    SPORTS: [
+      'thể thao',
+      'bóng đá',
+      'vô địch',
+      'giải đấu',
+      'cầu thủ',
+      'huấn luyện viên',
+      'olympic',
+    ],
+  };
+
+  // Training data for categories
+  private readonly TRAINING_DATA = {
+    POLITICS: [
+      'chính phủ họp bàn về chính sách mới',
+      'quốc hội thông qua nghị quyết',
+      'bộ trưởng phát biểu về định hướng phát triển',
+      'đại biểu quốc hội thảo luận',
+      'chính sách đối ngoại mới',
+      'thủ tướng chỉ đạo các bộ ngành',
+      'nghị quyết được thông qua',
+      'ủy ban thường vụ quốc hội',
+      'chủ tịch nước tiếp đón phái đoàn',
+      'hội nghị trung ương',
+    ],
+    ECONOMY: [
+      'thị trường chứng khoán biến động',
+      'giá xăng dầu tăng mạnh',
+      'doanh nghiệp công bố kết quả kinh doanh',
+      'xuất khẩu tăng trưởng',
+      'ngân hàng điều chỉnh lãi suất',
+      'tỷ giá ngoại tệ biến động',
+      'chỉ số giá tiêu dùng CPI',
+      'thị trường bất động sản',
+      'đầu tư trực tiếp nước ngoài',
+      'cổ phiếu bluechip',
+    ],
+    SOCIETY: [
+      'đời sống người dân cải thiện',
+      'vấn đề an sinh xã hội',
+      'hoạt động cộng đồng sôi nổi',
+      'phúc lợi xã hội được đảm bảo',
+      'dân sinh thay đổi tích cực',
+      'tình hình an ninh trật tự',
+      'công tác phòng chống dịch',
+      'chương trình giảm nghèo',
+      'bảo vệ quyền trẻ em',
+      'phong trào đền ơn đáp nghĩa',
+    ],
+    CULTURE: [
+      'lễ hội truyền thống độc đáo',
+      'di sản văn hóa được bảo tồn',
+      'nghệ thuật biểu diễn đặc sắc',
+      'văn hóa dân tộc phát triển',
+      'điện ảnh Việt Nam tiến bộ',
+      'triển lãm nghệ thuật',
+      'ca nhạc dân tộc',
+      'bảo tàng trưng bày',
+      'nghệ sĩ biểu diễn',
+      'phim điện ảnh ra mắt',
+    ],
+    SPORTS: [
+      'đội tuyển bóng đá chiến thắng',
+      'vận động viên đạt huy chương',
+      'giải đấu quốc tế sôi động',
+      'huấn luyện viên chia sẻ chiến thuật',
+      'thể thao Việt Nam phát triển',
+      'cầu thủ xuất sắc',
+      'olympic tokyo',
+      'sea games',
+      'vòng loại world cup',
+      'giải vô địch quốc gia',
+    ],
+  };
 
   constructor(private readonly configService: ConfigService) {
     this.wordTokenizer = vntk.wordTokenizer();
     this.posTag = vntk.posTag();
     this.dictionary = vntk.dictionary();
+    this.util = vntk.util();
+    this.bayesClassifier = new vntk.BayesClassifier();
+    this.initializeBayesClassifier();
+  }
+
+  private initializeBayesClassifier(): void {
+    try {
+      // Train the classifier with examples
+      Object.entries(this.TRAINING_DATA).forEach(([category, examples]) => {
+        examples.forEach((example) => {
+          this.bayesClassifier.addDocument(example, category);
+        });
+      });
+
+      // Train the model
+      this.bayesClassifier.train();
+      this.logger.log('Bayes Classifier trained successfully');
+    } catch (error) {
+      this.logger.error('Error training Bayes Classifier:', error);
+    }
   }
 
   private calculateTopicCount(tokenCount: number): number {
     const e = 2.71828;
-
     return Math.max(5, Math.min(30, Math.floor(Math.log2(tokenCount) * e)));
   }
 
-  private isVietnameseWord(word: string): boolean {
-    return word.length >= 2 && this.dictionary.has(word.toLowerCase());
-  }
-
   private normalizeVietnameseText(text: string): string {
-    const util = vntk.util();
     return (
-      util
+      this.util
         .clean_html(text)
         // Loại bỏ ngày tháng và số
         .replace(/\d+[-/]\d+[-/]\d+|\d+[/-]\d+|\d+/g, ' ')
@@ -142,7 +255,7 @@ export class GoogleSearchService {
     try {
       return this.wordTokenizer.tag(text);
     } catch (error) {
-      console.error('Error in word tokenization:', error);
+      this.logger.error('Error in word tokenization:', error);
       return text.split(' ');
     }
   }
@@ -152,8 +265,7 @@ export class GoogleSearchService {
       const tags = this.posTag.tag(phrase);
 
       let score = 0;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for (const [_, tag] of tags) {
+      for (const [, tag] of tags) {
         switch (tag) {
           case 'N':
           case 'Np':
@@ -169,23 +281,17 @@ export class GoogleSearchService {
       }
       return {
         score,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        hasNoun: tags.some(([_, tag]) => tag === 'N' || tag === 'Np'),
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        hasVerb: tags.some(([_, tag]) => tag === 'V'),
+        hasNoun: tags.some(([, tag]) => tag === 'N' || tag === 'Np'),
+        hasVerb: tags.some(([, tag]) => tag === 'V'),
       };
     } catch (error) {
-      console.error('Error in POS tagging:', error);
+      this.logger.error('Error in POS tagging:', error);
       return {
         score: 1,
         hasNoun: true,
         hasVerb: true,
       };
     }
-  }
-
-  private isNamePart(word: string): boolean {
-    return this.NAME_PREFIXES.has(word.toLowerCase());
   }
 
   private isStopWord(word: string): boolean {
@@ -195,20 +301,16 @@ export class GoogleSearchService {
   private isValidPhrase(phrase: string): boolean {
     const words = phrase.split(' ');
 
-    // Kiểm tra độ dài từ
     if (words.length < 2 || words.length > 4) return false;
 
-    // Kiểm tra stop words ở đầu và cuối
     if (this.isStopWord(words[0]) || this.isStopWord(words[words.length - 1])) {
       return false;
     }
 
-    // Kiểm tra xem có phải là thuật ngữ thể thao
     if (this.SPORT_TERMS.has(phrase.toLowerCase())) {
       return true;
     }
 
-    // Kiểm tra từ điển và độ dài từ
     return words.some(
       (word) =>
         word.length >= 2 &&
@@ -233,27 +335,16 @@ export class GoogleSearchService {
     wordFreq: Record<string, number>,
   ): Promise<number> {
     const words = phrase.split(' ');
-
     const analysis = await this.analyzePhrase(phrase);
-
     const freqScore =
       words.reduce((sum, word) => sum + (wordFreq[word] || 0), 0) /
       words.length;
-
     const grammarScore = analysis.score;
-
-    // Thưởng cho cụm từ thể thao
     const sportTermBonus = this.SPORT_TERMS.has(phrase.toLowerCase()) ? 2 : 1;
-
-    // Thưởng cho cụm từ có trong từ điển
     const dictionaryBonus = this.dictionary.has(phrase) ? 1.5 : 1;
-
-    // Phạt cho cụm từ có stop words
     const stopWordPenalty = words.some((word) => this.isStopWord(word))
       ? 0.5
       : 1;
-
-    // Thưởng cho độ dài phù hợp
     const lengthBonus = words.length >= 2 && words.length <= 3 ? 1.5 : 1;
 
     return (
@@ -268,10 +359,12 @@ export class GoogleSearchService {
 
   private async getMainTopics(text: string): Promise<string[]> {
     const normalizedText = this.normalizeVietnameseText(text);
-
     const words = this.tokenizeVietnamese(normalizedText);
-
     const topicCount = this.calculateTopicCount(words.length);
+
+    // Sử dụng Bayes để phân loại văn bản
+    const mainCategory = this.bayesClassifier.classify(normalizedText);
+    const categoryKeywords = this.CATEGORY_KEYWORDS[mainCategory] || [];
 
     const wordFreq: Record<string, number> = {};
     words.forEach((word) => {
@@ -282,28 +375,144 @@ export class GoogleSearchService {
     const trigrams = this.getUniqueNGrams(words, 3);
     const quadgrams = this.getUniqueNGrams(words, 4);
 
+    // Tăng điểm cho các cụm từ liên quan đến chủ đề chính
     const scoredPhrases = await Promise.all(
-      [...bigrams, ...trigrams, ...quadgrams].map(async (phrase) => ({
-        phrase,
-        score: await this.scorePhraseVietnamese(phrase, wordFreq),
-      })),
+      [...bigrams, ...trigrams, ...quadgrams].map(async (phrase) => {
+        let baseScore = await this.scorePhraseVietnamese(phrase, wordFreq);
+
+        // Tăng điểm nếu cụm từ chứa từ khóa của chủ đề chính
+        const containsCategoryKeyword = categoryKeywords.some((keyword) =>
+          phrase.toLowerCase().includes(keyword.toLowerCase()),
+        );
+        if (containsCategoryKeyword) {
+          baseScore *= 1.5; // Tăng 50% điểm cho các cụm từ liên quan đến chủ đề
+        }
+
+        return {
+          phrase,
+          score: baseScore,
+          category: mainCategory,
+        };
+      }),
     );
 
     scoredPhrases.sort((a, b) => b.score - a.score);
 
     const topPhrases = new Set<string>();
     const usedWords = new Set<string>();
+    const categoryPhrases = new Set<string>();
 
+    // Ưu tiên chọn các cụm từ liên quan đến chủ đề chính
     for (const { phrase } of scoredPhrases) {
       const phraseWords = phrase.split(' ');
       if (!phraseWords.some((word) => usedWords.has(word))) {
-        topPhrases.add(phrase);
+        if (
+          categoryKeywords.some((keyword) =>
+            phrase.toLowerCase().includes(keyword.toLowerCase()),
+          )
+        ) {
+          categoryPhrases.add(phrase);
+        } else {
+          topPhrases.add(phrase);
+        }
         phraseWords.forEach((word) => usedWords.add(word));
       }
-      if (topPhrases.size >= topicCount) break;
+      if (categoryPhrases.size + topPhrases.size >= topicCount) break;
     }
 
-    return Array.from(topPhrases);
+    // Kết hợp các cụm từ, ưu tiên các cụm từ liên quan đến chủ đề
+    const combinedPhrases = [...categoryPhrases, ...topPhrases].slice(
+      0,
+      topicCount,
+    );
+    return combinedPhrases;
+  }
+
+  private async classifyContent(text: string): Promise<string[]> {
+    try {
+      // Clean and normalize text
+      const cleanText = this.util.clean_html(text);
+
+      // Get Bayes classification
+      const bayesCategory = this.bayesClassifier.classify(cleanText);
+
+      // Get keyword-based classification
+      const tokens = this.wordTokenizer.tag(cleanText.toLowerCase());
+      const categories = new Map<string, number>();
+
+      // Score each category based on keywords
+      for (const [category, keywords] of Object.entries(
+        this.CATEGORY_KEYWORDS,
+      )) {
+        let score = 0;
+        for (const token of tokens) {
+          if (keywords.includes(token)) {
+            score++;
+          }
+        }
+        if (score > 0) {
+          categories.set(category, score);
+        }
+      }
+
+      // Combine both classifications
+      const keywordCategories = Array.from(categories.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .map(([category]) => this.MAIN_CATEGORIES[category]);
+
+      // Add Bayes classification if not already included
+      if (!keywordCategories.includes(this.MAIN_CATEGORIES[bayesCategory])) {
+        keywordCategories.unshift(this.MAIN_CATEGORIES[bayesCategory]);
+      }
+
+      return keywordCategories.length > 0
+        ? keywordCategories
+        : ['Chưa phân loại'];
+    } catch (error) {
+      this.logger.error('Lỗi khi phân loại nội dung:', error);
+      return ['Chưa phân loại'];
+    }
+  }
+
+  private async generateTags(text: string): Promise<string[]> {
+    try {
+      const posTags = this.posTag.tag(text);
+      const tags = new Set<string>();
+
+      // Xử lý các cụm từ có ý nghĩa
+      for (let i = 0; i < posTags.length - 1; i++) {
+        const [word, tag] = posTags[i];
+        const nextTag = posTags[i + 1]?.[1];
+
+        if (
+          (tag === 'N' && nextTag === 'N') || // Cụm danh từ
+          (tag === 'N' && nextTag === 'A') || // Danh từ + Tính từ
+          (tag === 'V' && nextTag === 'N') // Động từ + Danh từ
+        ) {
+          const phrase = `${word} ${posTags[i + 1][0]}`;
+          if (phrase.length > 5) {
+            tags.add(phrase);
+          }
+        }
+      }
+
+      // Thêm các từ đơn có ý nghĩa
+      posTags.forEach(([word, tag]) => {
+        if (
+          (tag === 'Np' || tag === 'N') && // Danh từ riêng hoặc danh từ
+          word.length > 3 &&
+          !this.isStopWord(word)
+        ) {
+          tags.add(word);
+        }
+      });
+
+      return Array.from(tags).slice(0, 10);
+    } catch (error) {
+      this.logger.error('Lỗi khi tạo tags:', error);
+      return [];
+    }
   }
 
   async searchKeyword(
@@ -321,20 +530,19 @@ export class GoogleSearchService {
     }
 
     const baseUrl = 'https://customsearch.googleapis.com/customsearch/v1';
-
-    // Xây dựng tham số tìm kiếm
-    const searchParams: any = {
+    const searchParams = {
       key: googleApiKey,
       cx: googleCx,
       hl: options.language || 'vi',
-      num: Math.min(options.resultCount || 10, 10), // Google API giới hạn 10 kết quả/request
+      num: Math.min(options.resultCount || 10, 10),
+      q: '',
+      dateRestrict: '',
+      sort: '',
     };
 
-    // Thêm bộ lọc ngày tháng
     if (options.dateRange) {
       const { from, to } = options.dateRange;
       searchParams.dateRestrict = this.getDateRestrictParam(from, to);
-      // Thêm sort=date nếu lọc theo ngày
       if (options.sortBy === 'date') {
         searchParams.sort = 'date';
       }
@@ -352,6 +560,8 @@ export class GoogleSearchService {
             response.data.items.map(async (item) => {
               const snippet = item.snippet || '';
               const topics = await this.getMainTopics(snippet);
+              const categories = await this.classifyContent(snippet);
+              const tags = await this.generateTags(snippet);
               const publishTime =
                 item.pagemap?.metatags?.[0]?.['article:published_time'];
 
@@ -360,6 +570,8 @@ export class GoogleSearchService {
                 snippet: snippet,
                 url: item.link || '',
                 topics: topics || [],
+                categories: categories || ['Chưa phân loại'],
+                tags: tags || [],
                 publishDate: publishTime ? new Date(publishTime) : null,
                 source: site,
               };
@@ -368,12 +580,11 @@ export class GoogleSearchService {
           results.push(...siteResults);
         }
       } catch (error) {
-        console.error(`Error searching ${site}:`, error.message);
+        this.logger.error(`Error searching ${site}:`, error.message);
         continue;
       }
     }
 
-    // Sắp xếp kết quả nếu cần
     if (options.sortBy === 'date') {
       results.sort((a, b) => {
         if (!a.publishDate || !b.publishDate) return 0;
@@ -382,6 +593,8 @@ export class GoogleSearchService {
     }
 
     await this.exportToCsv(results, keyword);
+    await this.exportToJson(results, keyword);
+
     return results;
   }
 
@@ -394,10 +607,8 @@ export class GoogleSearchService {
       (now.getTime() - to.getTime()) / (1000 * 60 * 60 * 24),
     );
 
-    // Nếu khoảng thời gian kết thúc trong quá khứ, không áp dụng bộ lọc
     if (toDiff < 0) return '';
 
-    // Sử dụng mốc thời gian bắt đầu để xác định phạm vi
     if (fromDiff <= 1) return 'd1';
     if (fromDiff <= 7) return 'w1';
     if (fromDiff <= 30) return 'm1';
@@ -411,63 +622,50 @@ export class GoogleSearchService {
     keyword: string,
   ): Promise<void> {
     const csvWriter = createObjectCsvWriter({
-      path: path.join(process.cwd(), `${keyword}_questions.csv`),
+      path: path.join(process.cwd(), `${keyword}_results.csv`),
       header: [
         { id: 'title', title: 'Title' },
         { id: 'snippet', title: 'Snippet' },
         { id: 'url', title: 'URL' },
         { id: 'topics', title: 'Topics' },
+        { id: 'categories', title: 'Categories' },
+        { id: 'tags', title: 'Tags' },
       ],
     });
 
-    const recordsWithTopics = results.map((result) => ({
+    const recordsWithArrays = results.map((result) => ({
       ...result,
       topics: Array.isArray(result.topics) ? result.topics.join(', ') : '',
+      categories: Array.isArray(result.categories)
+        ? result.categories.join(', ')
+        : '',
+      tags: Array.isArray(result.tags) ? result.tags.join(', ') : '',
     }));
 
-    await csvWriter.writeRecords(recordsWithTopics);
+    await csvWriter.writeRecords(recordsWithArrays);
   }
 
-  private removeDuplicateResults(results: SearchResult[]): SearchResult[] {
-    const seen = new Set<string>();
-    const uniqueResults: SearchResult[] = [];
+  private async exportToJson(
+    results: SearchResult[],
+    keyword: string,
+  ): Promise<void> {
+    const jsonContent = JSON.stringify(results, null, 2);
+    const filePath = path.join(process.cwd(), `${keyword}_results.json`);
 
-    for (const result of results) {
-      const normalizedTitle = this.normalizeVietnameseText(result.title);
-      const key = `${result.url}|${normalizedTitle}`;
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueResults.push(result);
-      }
+    try {
+      await fs.promises.writeFile(filePath, jsonContent, 'utf8');
+      this.logger.log(`Results exported to JSON file: ${filePath}`);
+    } catch (error) {
+      this.logger.error('Error exporting to JSON:', error);
     }
-
-    return uniqueResults;
-  }
-
-  private calculateSimilarity(text1: string, text2: string): number {
-    const words1 = new Set(this.tokenizeVietnamese(text1.toLowerCase()));
-    const words2 = new Set(this.tokenizeVietnamese(text2.toLowerCase()));
-
-    const intersection = new Set(
-      [...words1].filter((word) => words2.has(word)),
-    );
-
-    return intersection.size / Math.max(words1.size, words2.size);
   }
 
   private async crawlArticleDetail(url: string): Promise<ArticleDetail> {
     try {
       const response = await axios.get(url);
-      console.log('Respone lấy được', response);
       const html = response.data;
-      console.log('HTML cần phân tích', html);
 
-      // Sử dụng VNTK để phân tích nội dung
-      const util = vntk.util();
-      const cleanText = util.clean_html(html);
-
-      // Phân tích nội dung
+      const cleanText = this.util.clean_html(html);
       const content = this.extractMainContent(cleanText);
       const images = this.extractImages(html);
       const tags = await this.extractTags(content);
@@ -481,10 +679,9 @@ export class GoogleSearchService {
         tags,
         author,
         publishDate,
-        sentiment: await this.analyzeSentiment(content),
       };
     } catch (error) {
-      console.error(
+      this.logger.error(
         `Error crawling article detail from ${url}:`,
         error.message,
       );
@@ -494,7 +691,6 @@ export class GoogleSearchService {
 
   private extractMainContent(cleanText: string): string {
     try {
-      // Tìm thẻ article hoặc div chứa nội dung chính
       const contentRegex =
         /<article[^>]*>(.*?)<\/article>|<div[^>]*class="[^"]*content[^"]*"[^>]*>(.*?)<\/div>/i;
       const match = cleanText.match(contentRegex);
@@ -506,7 +702,7 @@ export class GoogleSearchService {
 
       return '';
     } catch (error) {
-      console.error('Error extracting main content:', error);
+      this.logger.error('Error extracting main content:', error);
       return '';
     }
   }
@@ -525,19 +721,17 @@ export class GoogleSearchService {
 
       return images;
     } catch (error) {
-      console.error('Error extracting images:', error);
+      this.logger.error('Error extracting images:', error);
       return [];
     }
   }
 
   private async extractTags(content: string): Promise<string[]> {
-    // Sử dụng getMainTopics để trích xuất tags
     return this.getMainTopics(content);
   }
 
   private extractAuthor(html: string): string | null {
     try {
-      // Tìm meta tag chứa thông tin tác giả
       const authorRegex = /<meta[^>]+name="author"[^>]+content="([^"]+)"/i;
       const match = html.match(authorRegex);
 
@@ -547,7 +741,7 @@ export class GoogleSearchService {
 
       return null;
     } catch (error) {
-      console.error('Error extracting author:', error);
+      this.logger.error('Error extracting author:', error);
       return null;
     }
   }
@@ -564,59 +758,8 @@ export class GoogleSearchService {
 
       return null;
     } catch (error) {
-      console.error('Error extracting publish date:', error);
+      this.logger.error('Error extracting publish date:', error);
       return null;
-    }
-  }
-
-  private async analyzeSentiment(text: string): Promise<{
-    sentiment: 'positive' | 'negative' | 'neutral';
-    score: number;
-  }> {
-    try {
-      const words = this.tokenizeVietnamese(text);
-      const score = 0;
-      let wordCount = 0;
-
-      for (const word of words) {
-        if (this.isVietnameseWord(word)) {
-          // Implement sentiment scoring logic here
-          wordCount++;
-        }
-      }
-
-      const avgScore = score / wordCount;
-
-      return {
-        sentiment:
-          avgScore > 0.1
-            ? 'positive'
-            : avgScore < -0.1
-              ? 'negative'
-              : 'neutral',
-        score: avgScore,
-      };
-    } catch (error) {
-      console.error('Error in sentiment analysis:', error);
-      return {
-        sentiment: 'neutral',
-        score: 0,
-      };
-    }
-  }
-
-  private async exportToJson(
-    results: SearchResult[],
-    keyword: string,
-  ): Promise<void> {
-    const jsonContent = JSON.stringify(results, null, 2);
-    const filePath = path.join(process.cwd(), `${keyword}_results.json`);
-
-    try {
-      await fs.promises.writeFile(filePath, jsonContent, 'utf8');
-      console.log(`Results exported to JSON file: ${filePath}`);
-    } catch (error) {
-      console.error('Error exporting to JSON:', error);
     }
   }
 
@@ -624,13 +767,9 @@ export class GoogleSearchService {
     keyword: string,
     options: SearchOptions = {},
   ): Promise<SearchResult[]> {
-    // Tìm kiếm cơ bản
     const basicResults = await this.searchKeyword(keyword, options);
-
-    // Loại bỏ kết quả trùng lặp
     const uniqueResults = this.removeDuplicateResults(basicResults);
 
-    // Thêm chi tiết cho mỗi kết quả
     const detailedResults = await Promise.all(
       uniqueResults.map(async (result) => {
         try {
@@ -640,7 +779,7 @@ export class GoogleSearchService {
             ...details,
           };
         } catch (error) {
-          console.error(
+          this.logger.error(
             `Error getting details for ${result.url}:`,
             error.message,
           );
@@ -649,10 +788,26 @@ export class GoogleSearchService {
       }),
     );
 
-    // Xuất kết quả ra cả CSV và JSON
     await this.exportToCsv(detailedResults, keyword);
     await this.exportToJson(detailedResults, keyword);
 
     return detailedResults;
+  }
+
+  private removeDuplicateResults(results: SearchResult[]): SearchResult[] {
+    const seen = new Set<string>();
+    const uniqueResults: SearchResult[] = [];
+
+    for (const result of results) {
+      const normalizedTitle = this.normalizeVietnameseText(result.title);
+      const key = `${result.url}|${normalizedTitle}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueResults.push(result);
+      }
+    }
+
+    return uniqueResults;
   }
 }

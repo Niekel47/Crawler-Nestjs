@@ -12,7 +12,7 @@ import { MetricsService } from '../metrics/metrics.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ElasticsearchService } from 'src/elasticsearch/elasticsearch.service';
+// import { ElasticsearchService } from 'src/elasticsearch/elasticsearch.service';
 
 @Injectable()
 export class VietnamnetService implements OnModuleInit {
@@ -43,7 +43,7 @@ export class VietnamnetService implements OnModuleInit {
     private readonly logger: LoggingService,
     private readonly redisService: RedisService,
     private readonly metricsService: MetricsService,
-    private readonly elasticsearchService: ElasticsearchService,
+    // private readonly elasticsearchService: ElasticsearchService,
   ) {}
 
   onModuleInit() {
@@ -156,7 +156,7 @@ export class VietnamnetService implements OnModuleInit {
 
       // Save article
       await this.articleRepository.save(article);
-      await this.elasticsearchService.indexArticle(article);
+      // await this.elasticsearchService.indexArticle(article);
 
       // Update cache and metrics
       await this.redisService.set(cacheKey, article);

@@ -19,7 +19,6 @@ import { PageRankService } from './page-rank.service';
 import { SearchWithPageRankService } from './search_engine.service';
 import { ContentAnalyzerService } from 'src/content_analyzer/content_analyzer.service';
 import { VnExpressWorker } from './vnexpress.worker';
-import { ElasticsearchService } from 'src/elasticsearch/elasticsearch.service';
 
 @Module({
   imports: [
@@ -50,7 +49,7 @@ import { ElasticsearchService } from 'src/elasticsearch/elasticsearch.service';
     SearchWithPageRankService,
     ContentAnalyzerService,
     VnExpressWorker,
-    ElasticsearchService,
+    // ElasticsearchService,
   ],
   exports: [WebCrawlerService],
 })

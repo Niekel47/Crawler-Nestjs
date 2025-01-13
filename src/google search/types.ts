@@ -1,3 +1,24 @@
+export interface SearchOptions {
+  language?: string;
+  resultCount?: number;
+  dateRange?: {
+    from: Date;
+    to: Date;
+  };
+  sortBy?: 'date' | 'relevance';
+}
+
+export interface SearchResult {
+  title: string;
+  snippet: string;
+  url: string;
+  topics: string[];
+  categories: string[]; // Thêm trường categories
+  tags: string[]; // Thêm trường tags
+  publishDate: Date | null;
+  source: string;
+}
+
 export interface ArticleDetail {
   url: string;
   content: string;
@@ -5,27 +26,8 @@ export interface ArticleDetail {
   tags: string[];
   author: string | null;
   publishDate: Date | null;
-  sentiment: {
+  sentiment?: {
     sentiment: 'positive' | 'negative' | 'neutral';
     score: number;
   };
-}
-
-export interface SearchOptions {
-  dateRange?: {
-    from: Date;
-    to: Date;
-  };
-  language?: string;
-  resultCount?: number;
-  sortBy?: 'date' | 'relevance';
-}
-
-export interface SearchResult extends Partial<ArticleDetail> {
-  title: string;
-  snippet: string;
-  url: string;
-  topics: string[];
-  publishDate?: Date | null;
-  source?: string;
 }

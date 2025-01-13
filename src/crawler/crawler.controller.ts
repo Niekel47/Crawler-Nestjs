@@ -11,7 +11,7 @@ import {
 import { WebCrawlerService } from './crawler.service';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { VnExpressWorker } from './vnexpress.worker';
-import { ElasticsearchService } from '../elasticsearch/elasticsearch.service';
+// import { ElasticsearchService } from '../elasticsearch/elasticsearch.service';
 
 @ApiTags('crawler')
 @Controller('crawler')
@@ -19,7 +19,7 @@ export class WebCrawlerController {
   constructor(
     private readonly webCrawlerService: WebCrawlerService,
     private readonly vnexpressWorker: VnExpressWorker,
-    private readonly elasticsearchService: ElasticsearchService,
+    // private readonly elasticsearchService: ElasticsearchService,
   ) {}
 
   @Get('articles')
@@ -41,28 +41,28 @@ export class WebCrawlerController {
     return this.webCrawlerService.getArticleById(id);
   }
 
-  @Get('search')
-  @ApiOperation({ summary: 'Search articles by keyword using Elasticsearch' })
-  @ApiQuery({ name: 'keyword', required: true, type: String })
-  @ApiQuery({ name: 'source', required: false, type: String })
-  @ApiQuery({ name: 'category', required: false, type: String })
-  @ApiQuery({ name: 'fromDate', required: false, type: String })
-  @ApiQuery({ name: 'toDate', required: false, type: String })
-  async searchArticles(
-    @Query('keyword') keyword: string,
-    @Query('source') source?: string,
-    @Query('category') category?: string,
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string,
-  ) {
-    const filters = {
-      source,
-      category,
-      fromDate: fromDate ? new Date(fromDate) : undefined,
-      toDate: toDate ? new Date(toDate) : undefined,
-    };
-    return this.webCrawlerService.searchByKeyword(keyword, filters);
-  }
+  // @Get('search')
+  // @ApiOperation({ summary: 'Search articles by keyword using Elasticsearch' })
+  // @ApiQuery({ name: 'keyword', required: true, type: String })
+  // @ApiQuery({ name: 'source', required: false, type: String })
+  // @ApiQuery({ name: 'category', required: false, type: String })
+  // @ApiQuery({ name: 'fromDate', required: false, type: String })
+  // @ApiQuery({ name: 'toDate', required: false, type: String })
+  // async searchArticles(
+  //   @Query('keyword') keyword: string,
+  //   @Query('source') source?: string,
+  //   @Query('category') category?: string,
+  //   @Query('fromDate') fromDate?: string,
+  //   @Query('toDate') toDate?: string,
+  // ) {
+  //   const filters = {
+  //     source,
+  //     category,
+  //     fromDate: fromDate ? new Date(fromDate) : undefined,
+  //     toDate: toDate ? new Date(toDate) : undefined,
+  //   };
+  //   return this.webCrawlerService.searchByKeyword(keyword, filters);
+  // }
 
   @Get('category/:name')
   @ApiOperation({ summary: 'Get articles by category' })
@@ -126,26 +126,26 @@ export class WebCrawlerController {
     }
   }
 
-  @Post('sync-elastic')
-  @ApiOperation({ summary: 'Sync all articles to Elasticsearch' })
-  async syncToElastic() {
-    try {
-      const { items: articles } = await this.webCrawlerService.getArticles(
-        1,
-        1000,
-      );
-      const result =
-        await this.elasticsearchService.syncArticlesToElastic(articles);
-      return {
-        success: true,
-        message: 'Articles synced to Elasticsearch successfully',
-        result,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
+  // @Post('sync-elastic')
+  // @ApiOperation({ summary: 'Sync all articles to Elasticsearch' })
+  // async syncToElastic() {
+  //   try {
+  //     const { items: articles } = await this.webCrawlerService.getArticles(
+  //       1,
+  //       1000,
+  //     );
+  //     const result =
+  //       await this.elasticsearchService.syncArticlesToElastic(articles);
+  //     return {
+  //       success: true,
+  //       message: 'Articles synced to Elasticsearch successfully',
+  //       result,
+  //     };
+  //   } catch (error) {
+  //     return {
+  //       success: false,
+  //       error: error.message,
+  //     };
+  //   }
+  // }
 }

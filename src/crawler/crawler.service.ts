@@ -16,7 +16,6 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import * as xml2js from 'xml2js';
 import axios, { AxiosInstance } from 'axios';
-import { ElasticsearchService } from 'src/elasticsearch/elasticsearch.service';
 
 @Injectable()
 export class WebCrawlerService implements OnModuleInit {
@@ -50,7 +49,6 @@ export class WebCrawlerService implements OnModuleInit {
     private readonly logger: LoggingService,
     private readonly redisService: RedisService,
     private readonly metricsService: MetricsService,
-    private readonly elasticsearchService: ElasticsearchService,
   ) {
     this.axiosInstance = axios.create({
       timeout: 30000,
@@ -253,51 +251,51 @@ export class WebCrawlerService implements OnModuleInit {
     }
   }
 
-  async searchByKeyword(
-    keyword: string,
-    filters?: {
-      source?: string;
-      category?: string;
-      fromDate?: Date;
-      toDate?: Date;
-    },
-  ) {
-    if (this.isRunning) {
-      this.logger.warn('Crawler is busy');
-      return;
-    }
+  // async searchByKeyword(
+  //   keyword: string,
+  //   filters?: {
+  //     source?: string;
+  //     category?: string;
+  //     fromDate?: Date;
+  //     toDate?: Date;
+  //   },
+  // ) {
+  //   if (this.isRunning) {
+  //     this.logger.warn('Crawler is busy');
+  //     return;
+  //   }
 
-    this.isRunning = true;
-    this.logger.log(`Starting search for keyword: ${keyword}`);
+  //   this.isRunning = true;
+  //   this.logger.log(`Starting search for keyword: ${keyword}`);
 
-    try {
-      const cacheKey = this.redisService.generateKey(
-        'vnexpress-search',
-        keyword + JSON.stringify(filters || {}),
-      );
-      const cachedResults = await this.redisService.get(cacheKey);
+  //   try {
+  //     const cacheKey = this.redisService.generateKey(
+  //       'vnexpress-search',
+  //       keyword + JSON.stringify(filters || {}),
+  //     );
+  //     const cachedResults = await this.redisService.get(cacheKey);
 
-      if (cachedResults) {
-        this.logger.debug(`Returning cached search results for: ${keyword}`);
-        return cachedResults;
-      }
+  //     if (cachedResults) {
+  //       this.logger.debug(`Returning cached search results for: ${keyword}`);
+  //       return cachedResults;
+  //     }
 
-      // Search using Elasticsearch
-      const results = await this.elasticsearchService.searchArticles(
-        keyword,
-        filters,
-      );
+  //     // Search using Elasticsearch
+  //     const results = await this.elasticsearchService.searchArticles(
+  //       keyword,
+  //       filters,
+  //     );
 
-      // Cache results for 1 hour
-      await this.redisService.set(cacheKey, results, 3600);
-      return results;
-    } catch (error) {
-      this.logger.error('Search error', error.stack);
-      throw error;
-    } finally {
-      this.isRunning = false;
-    }
-  }
+  //     // Cache results for 1 hour
+  //     await this.redisService.set(cacheKey, results, 3600);
+  //     return results;
+  //   } catch (error) {
+  //     this.logger.error('Search error', error.stack);
+  //     throw error;
+  //   } finally {
+  //     this.isRunning = false;
+  //   }
+  // }
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
