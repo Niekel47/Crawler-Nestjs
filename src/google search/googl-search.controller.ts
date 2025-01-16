@@ -22,4 +22,14 @@ export class GoogleSearchController {
   ): Promise<SearchResult[]> {
     return this.googleSearchService.searchKeywordWithDetails(keyword);
   }
+
+  @Get('search-without-sites')
+  async searchKeywordWithoutSites(
+    @Query('keyword') keyword: string,
+  ): Promise<SearchResult[]> {
+    if (!keyword) {
+      throw new Error('Keyword is required');
+    }
+    return this.googleSearchService.searchKeywordWithoutSites(keyword);
+  }
 }

@@ -153,4 +153,20 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return 0;
     }
   }
+
+  async keys(pattern: string): Promise<string[]> {
+    try {
+      const keys = await this.redis.keys(pattern);
+      this.logger.debug(
+        `Found ${keys.length} keys matching pattern: ${pattern}`,
+      );
+      return keys;
+    } catch (error) {
+      this.logger.error(
+        `Error getting keys with pattern: ${pattern}`,
+        error.stack,
+      );
+      return [];
+    }
+  }
 }

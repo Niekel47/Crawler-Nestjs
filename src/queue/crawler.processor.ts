@@ -6,14 +6,14 @@ import { WebCrawlerService } from '../crawler/crawler.service';
 import { Worker } from 'worker_threads';
 import * as path from 'path';
 
-@Processor('crawler')
+// @Processor('crawler')
 export class CrawlerProcessor {
   constructor(
     private readonly logger: LoggingService,
     private readonly crawlerService: WebCrawlerService,
   ) {}
 
-  @Process('crawl')
+  // @Process('crawl')
   async handleCrawl(job: Job) {
     try {
       this.logger.log(`Processing crawl job ${job.id}`);

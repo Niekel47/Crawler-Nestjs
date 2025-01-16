@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import { createObjectCsvWriter } from 'csv-writer';
 import { SearchOptions, SearchResult, ArticleDetail } from './types';
 import * as vntk from 'vntk';
+import { RedisService } from 'src/redis/redis.service';
 
 @Injectable()
 export class GoogleSearchService {
@@ -13,9 +14,27 @@ export class GoogleSearchService {
   private readonly SITE_LIST = [
     'https://tuoitre.vn',
     'https://nld.com.vn',
-    'https://vnexpress.net',
-    'https://thanhnien.vn',
+    'https://tienphong.vn',
     'https://dantri.com.vn',
+    'https://zingnews.vn',
+    'https://vietnamnet.vn',
+    'https://vov.vn',
+    'https://laodong.vn',
+    'https://www.sggp.org.vn',
+    'https://plo.vn',
+    'https://nhandan.vn',
+    'https://baochinhphu.vn',
+    'https://vtv.vn',
+    'https://vneconomy.vn',
+    'https://cafef.vn',
+    'https://vietbao.vn',
+    'https://kenh14.vn',
+    'https://soha.vn',
+    'https://genk.vn',
+    'https://vnexpress.net',
+    'https://baomoi.com',
+    'https://thanhnien.vn',
+    'https://www.msn.com/vi-vn',
   ];
 
   private readonly wordTokenizer;
@@ -205,15 +224,128 @@ export class GoogleSearchService {
       'vòng loại world cup',
       'giải vô địch quốc gia',
     ],
+    EDUCATION: [
+      'học sinh đạt điểm cao',
+      'sinh viên đạt huy chương',
+      'trường đại học',
+      'đề thi đại học',
+      'học bổng du học',
+      'Chính phủ triển khai chương trình học bổng cho học sinh nghèo vượt khó',
+      'Các trường đại học đang chuyển sang đào tạo trực tuyến do đại dịch',
+      'Bộ Giáo dục và Đào tạo công bố phương án thi tốt nghiệp THPT',
+      'Các cơ sở giáo dục nâng cao chất lượng giảng dạy bằng việc áp dụng công nghệ',
+      'Học sinh tham gia các cuộc thi học thuật quốc tế',
+    ],
+    TECHNOLOGY: [
+      'công nghệ thông tin',
+      'máy tính',
+      'điện toán đám mây',
+      'mạng máy tính',
+      'thiết bị điện tử',
+      'Các công ty công nghệ lớn ra mắt sản phẩm mới',
+      'Công nghệ AI đang thay đổi ngành công nghiệp sản xuất',
+      'Blockchain giúp tăng cường tính bảo mật trong giao dịch tài chính',
+      'Công nghệ 5G sẽ đem lại tốc độ internet nhanh gấp nhiều lần so với 4G',
+      'Các chuyên gia công nghệ dự đoán sự phát triển mạnh mẽ của công nghệ điện toán đám mây',
+    ],
+    HEALTH: [
+      'y tế',
+      'bệnh tật',
+      'điều trị',
+      'chăm sóc sức khỏe',
+      'dịch bệnh',
+      'Các bệnh viện đang triển khai chương trình tiêm chủng phòng dịch',
+      'Chính phủ tổ chức chiến dịch tuyên truyền về sức khỏe cộng đồng',
+      'Các bác sĩ khuyến cáo người dân tiêm vaccine phòng ngừa bệnh cúm',
+      'Tình hình dịch bệnh COVID-19 đang có dấu hiệu ổn định sau các biện pháp phòng chống',
+      'Chính phủ đầu tư vào hệ thống y tế để nâng cao chất lượng chăm sóc sức khỏe',
+    ],
+    ENVIRONMENT: [
+      'môi trường',
+      'khí hậu',
+      'động vật',
+      'thực vật',
+      'đất',
+      'Chính phủ triển khai các dự án bảo vệ môi trường',
+      'Các tổ chức bảo vệ động vật hoang dã kêu gọi bảo vệ các loài nguy cấp',
+      'Biến đổi khí hậu là vấn đề quan trọng đươc các quốc gia trên thế giới quan tâm',
+      'Các hoạt động bảo vệ rừng giúp bảo vệ nguồn tài nguyên thiên nhiên',
+      'Chính sách bảo vệ môi trường giúp giảm thiểu ô nhiễm không khí',
+    ],
+    WORLD: [
+      'thế giới',
+      'quốc tế',
+      'Các quốc gia trên thế giới đối mặt với khủng hoảng khí hậu',
+      'Tình hình chính trị tại Trung Đông đang rất phức tạp',
+      'Cộng đồng quốc tế kêu gọi các nước cùng hợp tác giải quyết vấn đề dịch bệnh',
+      'Các quốc gia tăng cường hợp tác trong các vấn đề an ninh toàn cầu',
+      'Cuộc khủng hoảng tại châu Âu ảnh hưởng đến nền kinh tế toàn cầu',
+    ],
   };
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
+  ) {
     this.wordTokenizer = vntk.wordTokenizer();
     this.posTag = vntk.posTag();
     this.dictionary = vntk.dictionary();
     this.util = vntk.util();
     this.bayesClassifier = new vntk.BayesClassifier();
     this.initializeBayesClassifier();
+  }
+
+  private generateSearchCacheKey(
+    keyword: string,
+    options: SearchOptions,
+  ): string {
+    const optionsHash = JSON.stringify({
+      language: options.language || 'vi',
+      resultCount: options.resultCount || 100,
+      dateRange: options.dateRange,
+      sortBy: options.sortBy,
+    });
+    return `search:${keyword}:${optionsHash}`;
+  }
+
+  private async getCachedResults(
+    cacheKey: string,
+  ): Promise<SearchResult[] | null> {
+    try {
+      return await this.redisService.get<SearchResult[]>(cacheKey);
+    } catch (error) {
+      this.logger.error('Error getting cached results:', error);
+      return null;
+    }
+  }
+
+  private async cacheResults(
+    cacheKey: string,
+    results: SearchResult[],
+  ): Promise<void> {
+    try {
+      // Cache trong 1 giờ
+      await this.redisService.set(cacheKey, results, 3600);
+    } catch (error) {
+      this.logger.error('Error caching results:', error);
+    }
+  }
+
+  async clearSearchCache(keyword: string): Promise<void> {
+    try {
+      const pattern = `search:${keyword}:*`;
+      const keys = await this.redisService.keys(pattern);
+      if (keys.length > 0) {
+        await Promise.all(keys.map((key) => this.redisService.del(key)));
+        this.logger.log(
+          `Cleared ${keys.length} cache entries for keyword: ${keyword}`,
+        );
+      } else {
+        this.logger.log(`No cache entries found for keyword: ${keyword}`);
+      }
+    } catch (error) {
+      this.logger.error('Error clearing search cache:', error);
+    }
   }
 
   private initializeBayesClassifier(): void {
@@ -519,6 +651,17 @@ export class GoogleSearchService {
     keyword: string,
     options: SearchOptions = {},
   ): Promise<SearchResult[]> {
+    // Kiểm tra cache
+    const cacheKey = this.generateSearchCacheKey(keyword, options);
+    console.log('cacheKey', cacheKey);
+    const cachedResults = await this.getCachedResults(cacheKey);
+    if (cachedResults) {
+      this.logger.log(`Cache hit for keyword: ${keyword}`);
+      return cachedResults;
+    }
+
+    this.logger.log(`Cache miss for keyword: ${keyword}, fetching from API`);
+
     const results: SearchResult[] = [];
     const googleApiKey = this.configService.get<string>('GOOGLE_API_KEY');
     const googleCx = this.configService.get<string>('GOOGLE_CX');
@@ -530,33 +673,37 @@ export class GoogleSearchService {
     }
 
     const baseUrl = 'https://customsearch.googleapis.com/customsearch/v1';
-    const searchParams = {
-      key: googleApiKey,
-      cx: googleCx,
-      hl: options.language || 'vi',
-      num: Math.min(options.resultCount || 10, 10),
-      q: '',
-      dateRestrict: '',
-      sort: '',
-    };
+    const itemsPerPage = 10;
+    const maxResults = Math.min(options.resultCount || 100, 100);
+    const totalPages = Math.ceil(maxResults / itemsPerPage);
 
-    if (options.dateRange) {
-      const { from, to } = options.dateRange;
-      searchParams.dateRestrict = this.getDateRestrictParam(from, to);
-      if (options.sortBy === 'date') {
-        searchParams.sort = 'date';
-      }
-    }
+    const siteQuery = this.SITE_LIST.map((site) => `site:${site}`).join(' OR ');
 
-    for (const site of this.SITE_LIST) {
+    for (let page = 0; page < totalPages; page++) {
       try {
-        const siteKeyword = `${keyword} site:${site}`;
-        searchParams.q = siteKeyword;
+        const searchParams = {
+          key: googleApiKey,
+          cx: googleCx,
+          hl: options.language || 'vi',
+          num: itemsPerPage,
+          start: page * itemsPerPage + 1,
+          q: `${keyword} (${siteQuery})`,
+          dateRestrict: '',
+          sort: '',
+        };
+
+        if (options.dateRange) {
+          const { from, to } = options.dateRange;
+          searchParams.dateRestrict = this.getDateRestrictParam(from, to);
+          if (options.sortBy === 'date') {
+            searchParams.sort = 'date';
+          }
+        }
 
         const response = await axios.get(baseUrl, { params: searchParams });
 
         if (response.data.items && Array.isArray(response.data.items)) {
-          const siteResults = await Promise.all(
+          const searchResults = await Promise.all(
             response.data.items.map(async (item) => {
               const snippet = item.snippet || '';
               const topics = await this.getMainTopics(snippet);
@@ -564,6 +711,9 @@ export class GoogleSearchService {
               const tags = await this.generateTags(snippet);
               const publishTime =
                 item.pagemap?.metatags?.[0]?.['article:published_time'];
+              const source =
+                this.SITE_LIST.find((site) => item.link?.includes(site)) ||
+                new URL(item.link || '').hostname;
 
               return {
                 title: item.title,
@@ -573,15 +723,15 @@ export class GoogleSearchService {
                 categories: categories || ['Chưa phân loại'],
                 tags: tags || [],
                 publishDate: publishTime ? new Date(publishTime) : null,
-                source: site,
+                source: source,
               };
             }),
           );
-          results.push(...siteResults);
+          results.push(...searchResults);
         }
       } catch (error) {
-        this.logger.error(`Error searching ${site}:`, error.message);
-        continue;
+        this.logger.error(`Error searching page ${page + 1}:`, error.message);
+        break;
       }
     }
 
@@ -592,8 +742,112 @@ export class GoogleSearchService {
       });
     }
 
+    // Cache kết quả trước khi xuất file và trả về
+    await this.cacheResults(cacheKey, results);
+
     await this.exportToCsv(results, keyword);
     await this.exportToJson(results, keyword);
+
+    return results;
+  }
+
+  async searchKeywordWithoutSites(
+    keyword: string,
+    options: SearchOptions = {},
+  ): Promise<SearchResult[]> {
+    // Kiểm tra cache
+    const cacheKey = this.generateSearchCacheKey(`global:${keyword}`, options);
+    const cachedResults = await this.getCachedResults(cacheKey);
+    if (cachedResults) {
+      this.logger.log(`Cache hit for global keyword: ${keyword}`);
+      return cachedResults;
+    }
+
+    this.logger.log(
+      `Cache miss for global keyword: ${keyword}, fetching from API`,
+    );
+
+    const results: SearchResult[] = [];
+    const googleApiKey = this.configService.get<string>('GOOGLE_API_KEY');
+    const googleCx = this.configService.get<string>('GOOGLE_CX');
+
+    if (!googleApiKey || !googleCx) {
+      throw new Error(
+        'Google API credentials not found in environment variables',
+      );
+    }
+
+    const baseUrl = 'https://customsearch.googleapis.com/customsearch/v1';
+    const itemsPerPage = 10;
+    const maxResults = Math.min(options.resultCount || 100, 100);
+    const totalPages = Math.ceil(maxResults / itemsPerPage);
+
+    for (let page = 0; page < totalPages; page++) {
+      try {
+        const searchParams = {
+          key: googleApiKey,
+          cx: googleCx,
+          hl: options.language || 'vi',
+          num: itemsPerPage,
+          start: page * itemsPerPage + 1,
+          q: keyword, // Chỉ tìm kiếm với keyword, không giới hạn site
+          dateRestrict: '',
+          sort: '',
+        };
+
+        if (options.dateRange) {
+          const { from, to } = options.dateRange;
+          searchParams.dateRestrict = this.getDateRestrictParam(from, to);
+          if (options.sortBy === 'date') {
+            searchParams.sort = 'date';
+          }
+        }
+
+        const response = await axios.get(baseUrl, { params: searchParams });
+
+        if (response.data.items && Array.isArray(response.data.items)) {
+          const searchResults = await Promise.all(
+            response.data.items.map(async (item) => {
+              const snippet = item.snippet || '';
+              const topics = await this.getMainTopics(snippet);
+              const categories = await this.classifyContent(snippet);
+              const tags = await this.generateTags(snippet);
+              const publishTime =
+                item.pagemap?.metatags?.[0]?.['article:published_time'];
+              const source = new URL(item.link || '').hostname;
+
+              return {
+                title: item.title,
+                snippet: snippet,
+                url: item.link || '',
+                topics: topics || [],
+                categories: categories || ['Chưa phân loại'],
+                tags: tags || [],
+                publishDate: publishTime ? new Date(publishTime) : null,
+                source: source,
+              };
+            }),
+          );
+          results.push(...searchResults);
+        }
+      } catch (error) {
+        this.logger.error(`Error searching page ${page + 1}:`, error.message);
+        break;
+      }
+    }
+
+    if (options.sortBy === 'date') {
+      results.sort((a, b) => {
+        if (!a.publishDate || !b.publishDate) return 0;
+        return b.publishDate.getTime() - a.publishDate.getTime();
+      });
+    }
+
+    // Cache kết quả trước khi xuất file và trả về
+    await this.cacheResults(cacheKey, results);
+
+    await this.exportToCsv(results, `global_${keyword}`);
+    await this.exportToJson(results, `global_${keyword}`);
 
     return results;
   }
@@ -621,40 +875,56 @@ export class GoogleSearchService {
     results: SearchResult[],
     keyword: string,
   ): Promise<void> {
-    const csvWriter = createObjectCsvWriter({
-      path: path.join(process.cwd(), `${keyword}_results.csv`),
-      header: [
-        { id: 'title', title: 'Title' },
-        { id: 'snippet', title: 'Snippet' },
-        { id: 'url', title: 'URL' },
-        { id: 'topics', title: 'Topics' },
-        { id: 'categories', title: 'Categories' },
-        { id: 'tags', title: 'Tags' },
-      ],
-    });
+    try {
+      // Tạo thư mục CSV nếu chưa tồn tại
+      const csvDir = path.join(process.cwd(), 'CSV');
+      await fs.promises.mkdir(csvDir, { recursive: true });
 
-    const recordsWithArrays = results.map((result) => ({
-      ...result,
-      topics: Array.isArray(result.topics) ? result.topics.join(', ') : '',
-      categories: Array.isArray(result.categories)
-        ? result.categories.join(', ')
-        : '',
-      tags: Array.isArray(result.tags) ? result.tags.join(', ') : '',
-    }));
+      const csvWriter = createObjectCsvWriter({
+        path: path.join(csvDir, `${keyword}_results.csv`),
+        header: [
+          { id: 'title', title: 'Title' },
+          { id: 'snippet', title: 'Snippet' },
+          { id: 'url', title: 'URL' },
+          { id: 'topics', title: 'Topics' },
+          { id: 'categories', title: 'Categories' },
+          { id: 'tags', title: 'Tags' },
+          { id: 'publishDate', title: 'Publish Date' },
+          { id: 'source', title: 'Source' },
+        ],
+      });
 
-    await csvWriter.writeRecords(recordsWithArrays);
+      const recordsWithArrays = results.map((result) => ({
+        ...result,
+        topics: Array.isArray(result.topics) ? result.topics.join(', ') : '',
+        categories: Array.isArray(result.categories)
+          ? result.categories.join(', ')
+          : '',
+        tags: Array.isArray(result.tags) ? result.tags.join(', ') : '',
+        publishDate: result.publishDate ? result.publishDate.toISOString() : '',
+      }));
+
+      await csvWriter.writeRecords(recordsWithArrays);
+      this.logger.log(`Results exported to CSV file: ${keyword}_results.csv`);
+    } catch (error) {
+      this.logger.error('Error exporting to CSV:', error);
+    }
   }
 
   private async exportToJson(
     results: SearchResult[],
     keyword: string,
   ): Promise<void> {
-    const jsonContent = JSON.stringify(results, null, 2);
-    const filePath = path.join(process.cwd(), `${keyword}_results.json`);
-
     try {
+      // Tạo thư mục JSON nếu chưa tồn tại
+      const jsonDir = path.join(process.cwd(), 'JSON');
+      await fs.promises.mkdir(jsonDir, { recursive: true });
+
+      const filePath = path.join(jsonDir, `${keyword}_results.json`);
+      const jsonContent = JSON.stringify(results, null, 2);
+
       await fs.promises.writeFile(filePath, jsonContent, 'utf8');
-      this.logger.log(`Results exported to JSON file: ${filePath}`);
+      this.logger.log(`Results exported to JSON file: ${keyword}_results.json`);
     } catch (error) {
       this.logger.error('Error exporting to JSON:', error);
     }
@@ -767,6 +1037,22 @@ export class GoogleSearchService {
     keyword: string,
     options: SearchOptions = {},
   ): Promise<SearchResult[]> {
+    const cacheKey = this.generateSearchCacheKey(
+      `detailed:${keyword}`,
+      options,
+    );
+
+    // Kiểm tra cache
+    const cachedResults = await this.getCachedResults(cacheKey);
+    if (cachedResults) {
+      this.logger.log(`Cache hit for detailed search: ${keyword}`);
+      return cachedResults;
+    }
+
+    this.logger.log(
+      `Cache miss for detailed search: ${keyword}, fetching data`,
+    );
+
     const basicResults = await this.searchKeyword(keyword, options);
     const uniqueResults = this.removeDuplicateResults(basicResults);
 
@@ -787,6 +1073,9 @@ export class GoogleSearchService {
         }
       }),
     );
+
+    // Cache kết quả chi tiết
+    await this.cacheResults(cacheKey, detailedResults);
 
     await this.exportToCsv(detailedResults, keyword);
     await this.exportToJson(detailedResults, keyword);
